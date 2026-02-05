@@ -12,19 +12,21 @@ import (
 )
 
 type Result struct {
-	Vmess        []*ProxyItem `json:"Vmess"`
-	Vless        []*ProxyItem `json:"Vless"`
-	ShadowSocks  []*ProxyItem `json:"Shadowsocks"`
-	ShadowSocksR []*ProxyItem `json:"ShadowsocksR"`
-	Trojan       []*ProxyItem `json:"Trojan"`
-	UpdateAt     string       `json:"UpdateAt"`
-	VmessTotal   int          `json:"VmessTotal"`
-	VlessTotal   int          `json:"VlessTotal"`
-	TrojanTotal  int          `json:"TrojanTotal"`
-	SSTotal      int          `json:"SSTotal"`
-	SSRTotal     int          `json:"SSRTotal"`
-	totalList    []*ProxyItem
-	lock         *sync.Mutex
+	Vmess          []*ProxyItem `json:"Vmess"`
+	Vless          []*ProxyItem `json:"Vless"`
+	ShadowSocks    []*ProxyItem `json:"Shadowsocks"`
+	ShadowSocksR   []*ProxyItem `json:"ShadowsocksR"`
+	Trojan         []*ProxyItem `json:"Trojan"`
+	Hysteria2      []*ProxyItem `json:"Hysteria2"` // [၁] Hysteria2 list အသစ်
+	UpdateAt       string       `json:"UpdateAt"`
+	VmessTotal     int          `json:"VmessTotal"`
+	VlessTotal     int          `json:"VlessTotal"`
+	TrojanTotal    int          `json:"TrojanTotal"`
+	SSTotal        int          `json:"SSTotal"`
+	SSRTotal       int          `json:"SSRTotal"`
+	Hysteria2Total int          `json:"Hysteria2Total"` // [၂] Total count field
+	totalList      []*ProxyItem
+	lock           *sync.Mutex
 }
 
 func NewResult() *Result {
@@ -53,9 +55,12 @@ func (that *Result) Save(fPath string) {
 
 func (that *Result) AddItem(proxyItem *ProxyItem) {
 	that.lock.Lock()
+	defer that.lock.Unlock() // Lock handling ကို ပိုသန့်ရှင်းအောင် defer သုံးထားပါတယ်
+	
 	if proxyItem == nil {
 		return
 	}
+
 	switch utils.ParseScheme(proxyItem.RawUri) {
 	case parser.SchemeVmess:
 		that.Vmess = append(that.Vmess, proxyItem)
@@ -72,29 +77,36 @@ func (that *Result) AddItem(proxyItem *ProxyItem) {
 	case parser.SchemeSSR:
 		that.ShadowSocksR = append(that.ShadowSocksR, proxyItem)
 		that.SSRTotal++
+	case parser.SchemeHysteria2: // [၃] Hysteria2 link ကို case ထည့်ခြင်း
+		that.Hysteria2 = append(that.Hysteria2, proxyItem)
+		that.Hysteria2Total++
 	default:
 	}
 	that.totalList = append(that.totalList, proxyItem)
-	that.lock.Unlock()
 }
 
 func (that *Result) Len() int {
-	return that.VmessTotal + that.VlessTotal + that.TrojanTotal + that.SSTotal + that.SSRTotal
+	return that.VmessTotal + that.VlessTotal + that.TrojanTotal + that.SSTotal + that.SSRTotal + that.Hysteria2Total
 }
 
 func (that *Result) GetTotalList() []*ProxyItem {
 	if len(that.totalList) != that.Len() {
+		// totalList ကို ပြန်တည်ဆောက်တဲ့အခါ Hysteria2 ကိုပါ ပေါင်းထည့်မယ်
+		that.totalList = []*ProxyItem{} // Clear old list
 		that.totalList = append(that.totalList, that.Vmess...)
 		that.totalList = append(that.totalList, that.Vless...)
 		that.totalList = append(that.totalList, that.Trojan...)
 		that.totalList = append(that.totalList, that.ShadowSocks...)
 		that.totalList = append(that.totalList, that.ShadowSocksR...)
+		that.totalList = append(that.totalList, that.Hysteria2...)
 	}
 	return that.totalList
 }
 
 func (that *Result) Clear() {
 	that.lock.Lock()
+	defer that.lock.Unlock()
+	
 	that.Vmess = []*ProxyItem{}
 	that.VmessTotal = 0
 	that.Vless = []*ProxyItem{}
@@ -105,6 +117,7 @@ func (that *Result) Clear() {
 	that.SSTotal = 0
 	that.ShadowSocksR = []*ProxyItem{}
 	that.SSRTotal = 0
+	that.Hysteria2 = []*ProxyItem{} // [၄] Clear Hysteria2
+	that.Hysteria2Total = 0
 	that.totalList = []*ProxyItem{}
-	that.lock.Unlock()
 }
