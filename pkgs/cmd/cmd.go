@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/dev7dev/uri-to-json/pkgs/outbound"
+	"github.com/ngwayzinmoe/uri-to-json/pkgs/outbound"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	cli "github.com/urfave/cli/v2"
 )
