@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
-	"strings"
 )
 
-// Hysteria2Config struct for JSON output
 type Hysteria2Config struct {
 	Server   string `json:"server"`
 	Port     int    `json:"port"`
@@ -21,7 +19,8 @@ type Hysteria2Config struct {
 }
 
 type ParserHysteria2 struct {
-	Config Hysteria2Config
+	Config      Hysteria2Config
+	StreamField *StreamField // [၁] StreamField Pointer ထည့်ပေးပါ (Outbound logic အတွက်)
 }
 
 func (p *ParserHysteria2) Parse(rawUri string) string {
@@ -30,7 +29,6 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 		return ""
 	}
 
-	// Remark (Tag) ကို ရယူခြင်း
 	remark := u.Fragment
 	if remark != "" {
 		if decodedRemark, err := url.QueryUnescape(remark); err == nil {
@@ -38,19 +36,14 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 		}
 	}
 
-	// Port ကို ပြောင်းလဲခြင်း
 	port, _ := strconv.Atoi(u.Port())
-
-	// Query parameters များ ရယူခြင်း
 	query := u.Query()
-	
-	// Insecure check (insecure or allow_insecure)
 	insecure := query.Get("insecure") == "1" || query.Get("allow_insecure") == "1"
 
 	p.Config = Hysteria2Config{
 		Server:   u.Hostname(),
 		Port:     port,
-		Auth:     u.User.Username(), // Hysteria2 မှာ password က user part မှာရှိတယ်
+		Auth:     u.User.Username(),
 		SNI:      query.Get("sni"),
 		Insecure: insecure,
 		OBFS:     query.Get("obfs"),
@@ -58,13 +51,28 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 		Remark:   remark,
 	}
 
-	// JSON အဖြစ် ပြောင်းလဲခြင်း
+	// [၂] Outbound တွေက လှမ်းသုံးမယ့် StreamField ကို Initialize လုပ်ပေးပါ
+	p.StreamField = &StreamField{
+		Network:          "udp",
+		StreamSecurity:   "tls",
+		ServerName:       p.Config.SNI,
+		TLSAllowInsecure: query.Get("insecure"),
+	}
+
 	jsonData, err := json.MarshalIndent(p.Config, "", "  ")
 	if err != nil {
 		return ""
 	}
-
 	return string(jsonData)
+}
+
+// [၃] Outbound logic က ခေါ်သုံးမယ့် Method များ (ဒါတွေမပါရင် Build ကျပါလိမ့်မယ်)
+func (p *ParserHysteria2) GetAddr() string {
+	return p.Config.Server
+}
+
+func (p *ParserHysteria2) GetPort() int {
+	return p.Config.Port
 }
 
 func (p *ParserHysteria2) ShowJSON(rawUri string) {
