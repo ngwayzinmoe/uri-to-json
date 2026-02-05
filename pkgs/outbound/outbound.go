@@ -29,8 +29,10 @@ func GetOutbound(clientType ClientType, rawUri string) (result IOutbound) {
 			result = &xray.TrojanOut{RawUri: rawUri}
 		case parser.SchemeSS:
 			result = &xray.ShadowSocksOut{RawUri: rawUri}
+		case parser.SchemeHysteria2: // [၁] Xray အတွက် Hysteria2 ကို Register လုပ်ခြင်း
+			result = &xray.Hysteria2Out{RawUri: rawUri}
 		default:
-			fmt.Println("unsupported protocol: ", scheme)
+			fmt.Println("unsupported protocol for Xray: ", scheme)
 		}
 	case SingBox:
 		switch scheme {
@@ -46,8 +48,10 @@ func GetOutbound(clientType ClientType, rawUri string) (result IOutbound) {
 			result = &sing.SShadowSocksROut{RawUri: rawUri}
 		case parser.SchemeWireguard:
 			result = &sing.SWireguardOut{RawUri: rawUri}
+		case parser.SchemeHysteria2: // [၂] Sing-box အတွက် Hysteria2 ကို Register လုပ်ခြင်း
+			result = &sing.SHysteria2Out{RawUri: rawUri}
 		default:
-			fmt.Println("unsupported protocol: ", scheme)
+			fmt.Println("unsupported protocol for Sing-box: ", scheme)
 		}
 	default:
 		fmt.Println("unsupported client type")
