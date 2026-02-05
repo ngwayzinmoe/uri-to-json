@@ -1,4 +1,4 @@
-module github.com/dev7dev/uri-to-json
+module github.com/ngwayzinmoe/uri-to-json
 
 go 1.20
 
