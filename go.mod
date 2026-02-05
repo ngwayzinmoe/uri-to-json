@@ -1,6 +1,6 @@
 module github.com/ngwayzinmoe/uri-to-json
 
-go 1.25.6
+go 1.20
 
 require (
 	github.com/gogf/gf/v2 v2.6.1
