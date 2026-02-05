@@ -125,6 +125,11 @@ var SingReality string = `{
 
 func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Json) {
 	var tp string
+	// အကယ်၍ network က plain tcp ဖြစ်နေရင် sing-box မှာ transport မလိုပါ
+	if sf.Network == "" {
+		sf.Network = "tcp"
+	}
+
 	switch sf.Network {
 	case "tcp", "http":
 		j := gjson.New(SingHTTPandTCP)
@@ -138,8 +143,9 @@ func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Js
 			h.Set("Host.0", host)
 			j = utils.SetJsonObjectByString("headers", h.MustToJsonString(), j)
 		}
-		SetPathForSingBoxTransport(sf.Path, j)
-		// j.Set("path", sf.Path)
+		if sf.Path != "" {
+			SetPathForSingBoxTransport(sf.Path, j)
+		}
 		tp = j.MustToJsonString()
 	case "ws":
 		j := gjson.New(SingWebSocket)
@@ -148,42 +154,43 @@ func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Js
 			host = sf.ServerName
 		}
 		if host != "" {
-			h := gjson.New(SingHTTPHeaders)
-			h.Set("Host", host)
-			j = utils.SetJsonObjectByString("headers", h.MustToJsonString(), j)
+			// WebSocket header ပြင်ဆင်မှု
+			j.Set("headers.Host", host)
 		}
 		if sf.Path == "" {
 			sf.Path = "/"
 		}
 		SetPathForSingBoxTransport(sf.Path, j)
-		// j.Set("path", sf.Path)
 		tp = j.MustToJsonString()
 	case "grpc":
 		j := gjson.New(SingGRPC)
 		j.Set("service_name", sf.GRPCServiceName)
 		tp = j.MustToJsonString()
 	default:
-		tp = "{}"
+		tp = "" // default protocol များအတွက်
 	}
-	cnf = utils.SetJsonObjectByString("transport", tp, cnf)
 
+	if tp != "" && tp != "{}" {
+		cnf = utils.SetJsonObjectByString("transport", tp, cnf)
+	}
+
+	// TLS / Reality Settings
 	var tlsStr string
-	switch sf.StreamSecurity {
-	case "tls", "reality":
+	// Shadowsocks Plugin တွေမှာ "tls" လို့ပါရင် security ကို tls လို့ သတ်မှတ်ပေးရမယ်
+	if sf.StreamSecurity == "tls" || sf.StreamSecurity == "reality" {
 		j := gjson.New(SingTLS)
 		if sf.ServerName == "" {
 			sf.ServerName = sf.Host
 		}
+		j.Set("enabled", true)
 		j.Set("server_name", sf.ServerName)
+		
 		allowInsecure := false
 		if sf.TLSAllowInsecure != "" {
 			allowInsecure = gconv.Bool(sf.TLSAllowInsecure)
 		}
-		j.Set("enabled", true)
 		j.Set("insecure", allowInsecure)
-		if sf.TLSALPN != "" {
-			j.Set("alpn", strings.Split(sf.TLSALPN, ","))
-		}
+
 		if sf.Fingerprint != "" {
 			utls := gjson.New(SinguTLS)
 			utls.Set("enabled", true)
@@ -191,19 +198,20 @@ func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Js
 			j = utils.SetJsonObjectByString("utls", utls.MustToJsonString(), j)
 		}
 
-		if sf.RealityShortId != "" && sf.RealityPublicKey != "" {
+		if sf.StreamSecurity == "reality" {
 			reality := gjson.New(SingReality)
+			reality.Set("enabled", true)
 			reality.Set("short_id", sf.RealityShortId)
 			reality.Set("public_key", sf.RealityPublicKey)
-			reality.Set("enabled", true)
 			j = utils.SetJsonObjectByString("reality", reality.MustToJsonString(), j)
 		}
 		tlsStr = j.MustToJsonString()
-		// fmt.Println(tlsStr)
-	default:
-		tlsStr = `{"enabled": false}`
 	}
-	result = utils.SetJsonObjectByString("tls", tlsStr, cnf)
+
+	if tlsStr != "" {
+		cnf = utils.SetJsonObjectByString("tls", tlsStr, cnf)
+	}
+	result = cnf
 	return
 }
 
