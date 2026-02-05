@@ -154,78 +154,65 @@ var XrayStreamGRPC string = `{
 
 func PrepareStreamString(sf *parser.StreamField) string {
 	stream := gjson.New(XrayStream)
+	
+	// Network မရှိရင် default tcp သုံးမယ်
+	if sf.Network == "" {
+		sf.Network = "tcp"
+	}
 	stream.Set("network", sf.Network)
 	stream.Set("security", sf.StreamSecurity)
 
 	switch sf.Network {
 	case "tcp":
-		if sf.TCPHeaderType != "http" {
-			stream = utils.SetJsonObjectByString("tcpSetting", XrayStreamTCPNone, stream)
-		} else {
+		if sf.TCPHeaderType == "http" {
 			j := gjson.New(XrayStreamTCPHTTP)
 			j.Set("header.request.path.0", sf.Path)
 			j.Set("header.request.headers.Host.0", sf.Host)
-			stream = utils.SetJsonObjectByString("tcpSetting", j.MustToJsonString(), stream)
+			// Xray standard က tcpSettings ဖြစ်ပါတယ်
+			stream = utils.SetJsonObjectByString("tcpSettings", j.MustToJsonString(), stream)
+		} else {
+			stream = utils.SetJsonObjectByString("tcpSettings", XrayStreamTCPNone, stream)
 		}
 	case "ws":
 		j := gjson.New(XrayStreamWebSocket)
+		if sf.Path == "" { sf.Path = "/" }
 		j.Set("path", sf.Path)
 		j.Set("headers.Host", sf.Host)
 		stream = utils.SetJsonObjectByString("wsSettings", j.MustToJsonString(), stream)
-	case "http":
-		j := gjson.New(XrayStreamHTTP)
-		j.Set("host.0", sf.Host)
-		j.Set("path", sf.Path)
-		stream = utils.SetJsonObjectByString("httpSettings", j.MustToJsonString(), stream)
 	case "grpc":
 		j := gjson.New(XrayStreamGRPC)
-		serviceName := sf.GRPCServiceName
-		if serviceName == "" {
-			serviceName = sf.Host
-		}
-		j.Set("serviceName", serviceName)
-		multiMode := false
+		j.Set("serviceName", sf.GRPCServiceName)
 		if sf.GRPCMultiMode == "multi" {
-			multiMode = true
+			j.Set("multiMode", true)
 		}
-		j.Set("multiMode", multiMode)
 		stream = utils.SetJsonObjectByString("grpcSettings", j.MustToJsonString(), stream)
-	default:
-		return "{}"
 	}
 
-	switch sf.StreamSecurity {
-	case "tls":
+	// Security Settings
+	if sf.StreamSecurity == "tls" {
 		j := gjson.New(XrayStreamTLS)
-		serverName := sf.ServerName
-		if serverName == "" {
-			serverName = sf.Host
-		}
-		j.Set("serverName", serverName)
+		sn := sf.ServerName
+		if sn == "" { sn = sf.Host }
+		j.Set("serverName", sn)
+		j.Set("allowInsecure", gconv.Bool(sf.TLSAllowInsecure))
 		if sf.TLSALPN != "" {
-			aList := strings.Split(sf.TLSALPN, ",")
-			j.Set("alpn", aList)
+			j.Set("alpn", strings.Split(sf.TLSALPN, ","))
 		}
 		if sf.Fingerprint != "" {
 			j.Set("fingerprint", sf.Fingerprint)
 		}
-		if sf.TLSAllowInsecure != "" {
-			j.Set("allowInsecure", gconv.Bool(sf.TLSAllowInsecure))
-		}
 		stream = utils.SetJsonObjectByString("tlsSettings", j.MustToJsonString(), stream)
-	case "reality":
+	} else if sf.StreamSecurity == "reality" {
 		j := gjson.New(XrayStreamReality)
-		serverName := sf.ServerName
-		if serverName == "" {
-			serverName = sf.Host
-		}
-		j.Set("serverName", serverName)
-		j.Set("shortId", sf.RealityShortId)
-		j.Set("fingerprint", sf.Fingerprint)
-		j.Set("spiderX", sf.RealitySpiderX)
+		sn := sf.ServerName
+		if sn == "" { sn = sf.Host }
+		j.Set("serverName", sn)
 		j.Set("publicKey", sf.RealityPublicKey)
+		j.Set("shortId", sf.RealityShortId)
+		j.Set("spiderX", sf.RealitySpiderX)
+		j.Set("fingerprint", sf.Fingerprint)
 		stream = utils.SetJsonObjectByString("realitySettings", j.MustToJsonString(), stream)
-	default:
 	}
+
 	return stream.MustToJsonString()
 }
