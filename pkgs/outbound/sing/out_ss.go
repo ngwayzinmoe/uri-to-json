@@ -104,6 +104,17 @@ func (that *SShadowSocksOut) getSettings() string {
 	j.Set("password", that.Parser.Password)
 	j.Set("tag", utils.OutboundTag)
 
+
+	// UDP support နှင့် UDP over TCP (UoT) သတ်မှတ်
+	j.Set("network", "udp")
+	j.Set("udp_over_tcp", map[string]interface{}{
+		"enabled": true,
+		"version": 2,
+	})
+
+
+	
+
 	if that.Parser.Plugin != "" {
 		j.Set("plugin", that.Parser.Plugin)
 	}
