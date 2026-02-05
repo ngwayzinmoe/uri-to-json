@@ -87,13 +87,18 @@ func (that *ShadowSocksOut) GetRawUri() string {
 }
 
 func (that *ShadowSocksOut) getSettings() string {
-	j := gjson.New(XraySS)
-	j.Set("servers.0.address", that.Parser.Address)
-	j.Set("servers.0.port", that.Parser.Port)
-	j.Set("servers.0.method", that.Parser.Method)
-	j.Set("servers.0.password", that.Parser.Password)
-	return j.MustToJsonString()
+    j := gjson.New(XraySS)
+    j.Set("servers.0.address", that.Parser.Address)
+    j.Set("servers.0.port", that.Parser.Port)
+    j.Set("servers.0.method", that.Parser.Method)
+    j.Set("servers.0.password", that.Parser.Password)
+    
+    // UDP support အတွက် uot ကို true
+    j.Set("servers.0.uot", true) 
+    j.Set("servers.0.UoTVersion", 2)
+    return j.MustToJsonString()
 }
+
 
 func (that *ShadowSocksOut) setProtocolAndTag(outStr string) string {
 	j := gjson.New(outStr)
