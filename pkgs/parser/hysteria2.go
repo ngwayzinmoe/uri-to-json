@@ -7,7 +7,6 @@ import (
 	"strconv"
 )
 
-// Hysteria2Config for internal and JSON data
 type Hysteria2Config struct {
 	Server   string `json:"server"`
 	Port     int    `json:"port"`
@@ -19,10 +18,9 @@ type Hysteria2Config struct {
 	Remark   string `json:"remark,omitempty"`
 }
 
-// ParserHysteria2 struct properly defined for outbound usage
 type ParserHysteria2 struct {
 	Config      Hysteria2Config
-	StreamField *StreamField 
+	StreamField *StreamField // [၁] StreamField Pointer ထည့်ပေးပါ (Outbound logic အတွက်)
 }
 
 func (p *ParserHysteria2) Parse(rawUri string) string {
@@ -40,9 +38,7 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 
 	port, _ := strconv.Atoi(u.Port())
 	query := u.Query()
-	
-	// Handle various insecure flag formats
-	insecure := query.Get("insecure") == "1" || query.Get("allow_insecure") == "1" || query.Get("insecure") == "true"
+	insecure := query.Get("insecure") == "1" || query.Get("allow_insecure") == "1"
 
 	p.Config = Hysteria2Config{
 		Server:   u.Hostname(),
@@ -55,12 +51,12 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 		Remark:   remark,
 	}
 
-	// Initialize StreamField for Sing-box/Xray transport logic
+	// [၂] Outbound တွေက လှမ်းသုံးမယ့် StreamField ကို Initialize လုပ်ပေးပါ
 	p.StreamField = &StreamField{
 		Network:          "udp",
 		StreamSecurity:   "tls",
 		ServerName:       p.Config.SNI,
-		TLSAllowInsecure: strconv.FormatBool(insecure),
+		TLSAllowInsecure: query.Get("insecure"),
 	}
 
 	jsonData, err := json.MarshalIndent(p.Config, "", "  ")
@@ -70,7 +66,7 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 	return string(jsonData)
 }
 
-// GetAddr and GetPort methods are REQUIRED by the outbound package
+// [၃] Outbound logic က ခေါ်သုံးမယ့် Method များ (ဒါတွေမပါရင် Build ကျပါလိမ့်မယ်)
 func (p *ParserHysteria2) GetAddr() string {
 	return p.Config.Server
 }
@@ -83,3 +79,4 @@ func (p *ParserHysteria2) ShowJSON(rawUri string) {
 	result := p.Parse(rawUri)
 	fmt.Println(result)
 }
+
