@@ -90,3 +90,4 @@ func (that *SHysteria2Out) GetOutboundStr() string {
 	}
 	return that.outbound
 }
+
