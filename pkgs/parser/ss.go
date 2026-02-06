@@ -2,124 +2,189 @@ package parser
 
 import (
 	"encoding/base64"
-	"fmt"
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
-var SSMethod map[string]struct{} = map[string]struct{}{
-	"2022-blake3-aes-128-gcm":       {},
-	"2022-blake3-aes-256-gcm":       {},
-	"2022-blake3-chacha20-poly1305": {},
-	"none":                          {},
-	"aes-128-gcm":                   {},
-	"aes-192-gcm":                   {},
-	"aes-256-gcm":                   {},
-	"chacha20-ietf-poly1305":        {},
-	"xchacha20-ietf-poly1305":       {},
-	"aes-128-ctr":                   {},
-	"aes-192-ctr":                   {},
-	"aes-256-ctr":                   {},
-	"aes-128-cfb":                   {},
-	"aes-192-cfb":                   {},
-	"aes-256-cfb":                   {},
-	"rc4-md5":                       {},
-	"chacha20-ietf":                 {},
-	"xchacha20":                     {},
+/*
+   Supported methods (Xray-safe focused)
+*/
+var SSMethod = map[string]struct{}{
+	"aes-128-gcm":            {},
+	"aes-256-gcm":            {},
+	"chacha20-ietf-poly1305": {},
+	"xchacha20-ietf-poly1305": {},
 }
 
+/*
+   Result model
+*/
 type ParserSS struct {
 	Address  string
 	Port     int
 	Method   string
 	Password string
-
-	Host     string
-	Mode     string
-	Mux      string
-	Path     string
-	Plugin   string
-	OBFS     string
-	OBFSHost string
-
-	*StreamField
+	Remark   string
 }
 
-func (that *ParserSS) Parse(rawUri string) {
-	// Fragments (#...) ကို ခဏဖယ်ထားမယ် (Remark တွေအတွက်)
-	if idx := strings.Index(rawUri, "#"); idx != -1 {
-		rawUri = rawUri[:idx]
+/*
+   Entry
+*/
+func (p *ParserSS) Parse(raw string) error {
+	if !strings.HasPrefix(raw, "ss://") {
+		return errors.New("not ss://")
 	}
 
-	rawUri = that.handleSS(rawUri)
-	u, err := url.Parse(rawUri)
+	// -------- fragment / remark --------
+	if i := strings.Index(raw, "#"); i != -1 {
+		p.Remark, _ = url.QueryUnescape(raw[i+1:])
+		raw = raw[:i]
+	}
+
+	raw = strings.TrimPrefix(raw, "ss://")
+
+	// -------- SIP002 format --------
+	// ss://BASE64(method:password)@host:port
+	if strings.Contains(raw, "@") {
+		return p.parseSIP002(raw)
+	}
+
+	// -------- Classic format --------
+	// ss://BASE64(method:password@host:port)
+	return p.parseClassic(raw)
+}
+
+/*
+   SIP002
+*/
+func (p *ParserSS) parseSIP002(raw string) error {
+	parts := strings.SplitN(raw, "@", 2)
+	if len(parts) != 2 {
+		return errors.New("invalid sip002")
+	}
+
+	// decode userinfo
+	userBytes, err := decodeSSBase64(parts[0])
 	if err != nil {
+		return err
+	}
+
+	user := string(userBytes)
+	mp := strings.SplitN(user, ":", 2)
+	if len(mp) != 2 {
+		return errors.New("invalid method:password")
+	}
+
+	p.Method = normalizeMethod(mp[0])
+	p.Password = mp[1]
+
+	host, portStr, ok := strings.Cut(parts[1], ":")
+	if !ok {
+		return errors.New("invalid host:port")
+	}
+
+	p.Address = host
+	p.Port, _ = strconv.Atoi(portStr)
+
+	return p.validate()
+}
+
+/*
+   Classic
+*/
+func (p *ParserSS) parseClassic(raw string) error {
+	decoded, err := decodeSSBase64(raw)
+	if err != nil {
+		return err
+	}
+
+	// method:password@host:port
+	s := string(decoded)
+
+	mpHost := strings.SplitN(s, "@", 2)
+	if len(mpHost) != 2 {
+		return errors.New("invalid classic ss")
+	}
+
+	mp := strings.SplitN(mpHost[0], ":", 2)
+	if len(mp) != 2 {
+		return errors.New("invalid method:password")
+	}
+
+	p.Method = normalizeMethod(mp[0])
+	p.Password = mp[1]
+
+	host, portStr, ok := strings.Cut(mpHost[1], ":")
+	if !ok {
+		return errors.New("invalid host:port")
+	}
+
+	p.Address = host
+	p.Port, _ = strconv.Atoi(portStr)
+
+	return p.validate()
+}
+
+/*
+   Validation
+*/
+func (p *ParserSS) validate() error {
+	if p.Address == "" || p.Port <= 0 {
+		return errors.New("invalid address or port")
+	}
+	if _, ok := SSMethod[p.Method]; !ok {
+		return errors.New("unsupported method")
+	}
+	return nil
+}
+
+/*
+   Method normalize
+*/
+func normalizeMethod(m string) string {
+	m = strings.ToLower(m)
+	if m == "rc4" {
+		m = "rc4-md5"
+	}
+	return m
+}
+
+/*
+   Robust Base64 decode
+*/
+func decodeSSBase64(s string) ([]byte, error) {
+	s = strings.ReplaceAll(s, "-", "+")
+	s = strings.ReplaceAll(s, "_", "/")
+
+	switch len(s) % 4 {
+	case 2:
+		s += "=="
+	case 3:
+		s += "="
+	}
+
+	return base64.StdEncoding.DecodeString(s)
+}
+
+func (p *ParserSS) Show() {
+	if p == nil {
+		fmt.Println("SS: <nil>")
 		return
 	}
 
-	that.StreamField = &StreamField{}
-	that.Address = u.Hostname()
-	that.Port, _ = strconv.Atoi(u.Port())
+	fmt.Printf(
+		"SS => addr: %s, port: %d, method: %s, password: %s",
+		p.Address,
+		p.Port,
+		p.Method,
+		p.Password,
+	)
 
-	userInfo := u.User.String()
-	// အကယ်၍ UserInfo ထဲမှာ ':' မပါရင် ဒါဟာ Base64 ဖြစ်ဖို့များတယ်
-	if !strings.Contains(userInfo, ":") {
-		decoded, err := base64.StdEncoding.DecodeString(userInfo)
-		if err == nil {
-			userInfo = string(decoded)
-		} else {
-			// တချို့ Base64 တွေက Padding (=) မပါတတ်လို့ RawStdEncoding နဲ့ပါ စမ်းမယ်
-			decoded, err = base64.RawStdEncoding.DecodeString(userInfo)
-			if err == nil {
-				userInfo = string(decoded)
-			}
-		}
+	if p.Remark != "" {
+		fmt.Printf(", remark: %s", p.Remark)
 	}
 
-	// Method နဲ့ Password ခွဲမယ်
-	parts := strings.SplitN(userInfo, ":", 2)
-	if len(parts) == 2 {
-		that.Method = parts[0]
-		that.Password = parts[1]
-	} else {
-		that.Method = parts[0]
-	}
-
-	// Alias တွေ ပြင်မယ်
-	if that.Method == "rc4" {
-		that.Method = "rc4-md5"
-	}
-	if _, ok := SSMethod[that.Method]; !ok {
-		that.Method = "none"
-	}
-
-	query := u.Query()
-	that.Host = query.Get("host")
-	that.Mode = query.Get("mode")
-	that.Mux = query.Get("mux")
-	that.Path = query.Get("path")
-	that.Plugin = query.Get("plugin")
-	that.OBFS = query.Get("obfs")
-	that.OBFSHost = query.Get("obfs-host")
-}
-
-func (that *ParserSS) handleSS(rawUri string) string {
-	return strings.ReplaceAll(rawUri, "#ss#\u00261@", "@")
-}
-
-func (that *ParserSS) GetAddr() string {
-	return that.Address
-}
-
-func (that *ParserSS) GetPort() int {
-	return that.Port
-}
-
-func (that *ParserSS) Show() {
-	fmt.Printf("addr: %s, port: %d, method: %s, password: %s\n",
-		that.Address,
-		that.Port,
-		that.Method,
-		that.Password)
+	fmt.Println()
 }
