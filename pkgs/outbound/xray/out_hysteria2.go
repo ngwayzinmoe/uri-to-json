@@ -111,3 +111,4 @@ func (that *Hysteria2Out) GetOutboundStr() string {
 	}
 	return that.outbound
 }
+
