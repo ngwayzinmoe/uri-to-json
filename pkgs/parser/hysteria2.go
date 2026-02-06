@@ -5,78 +5,118 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
+// Hysteria2Config represents a Hysteria2 server configuration
 type Hysteria2Config struct {
 	Server   string `json:"server"`
 	Port     int    `json:"port"`
 	Auth     string `json:"auth"`
-	SNI      string `json:"sni"`
+	SNI      string `json:"sni,omitempty"`
 	Insecure bool   `json:"insecure"`
 	OBFS     string `json:"obfs,omitempty"`
 	OBFSPass string `json:"obfs_password,omitempty"`
 	Remark   string `json:"remark,omitempty"`
 }
 
+// ParserHysteria2 parses hysteria:// URIs
 type ParserHysteria2 struct {
 	Config      Hysteria2Config
-	StreamField *StreamField // [၁] StreamField Pointer ထည့်ပေးပါ (Outbound logic အတွက်)
+	StreamField *StreamField // for outbound use
 }
 
-func (p *ParserHysteria2) Parse(rawUri string) string {
-	u, err := url.Parse(rawUri)
+// Parse parses a hysteria:// URI into Hysteria2Config
+func (p *ParserHysteria2) Parse(rawUri string) error {
+	if !strings.HasPrefix(rawUri, "hysteria://") {
+		return fmt.Errorf("invalid hysteria URI")
+	}
+
+	// remove scheme
+	rawUri = strings.TrimPrefix(rawUri, "hysteria://")
+
+	// split fragment (#...)
+	remark := ""
+	if idx := strings.Index(rawUri, "#"); idx != -1 {
+		remark, _ = url.QueryUnescape(rawUri[idx+1:])
+		rawUri = rawUri[:idx]
+	}
+
+	// parse query
+	var queryStr string
+	if idx := strings.Index(rawUri, "?"); idx != -1 {
+		queryStr = rawUri[idx+1:]
+		rawUri = rawUri[:idx]
+	}
+
+	// parse user info and host:port
+	userHost := strings.SplitN(rawUri, "@", 2)
+	if len(userHost) != 2 {
+		return fmt.Errorf("invalid hysteria URI, missing auth or host")
+	}
+
+	auth := userHost[0]
+	hostPort := userHost[1]
+
+	host, portStr, err := netSplitHostPort(hostPort)
 	if err != nil {
-		return ""
+		return err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("invalid port: %v", err)
 	}
 
-	remark := u.Fragment
-	if remark != "" {
-		if decodedRemark, err := url.QueryUnescape(remark); err == nil {
-			remark = decodedRemark
-		}
-	}
-
-	port, _ := strconv.Atoi(u.Port())
-	query := u.Query()
-	insecure := query.Get("insecure") == "1" || query.Get("allow_insecure") == "1"
+	// parse query parameters
+	qValues, _ := url.ParseQuery(queryStr)
+	insecure := qValues.Get("insecure") == "1" || qValues.Get("allow_insecure") == "1"
 
 	p.Config = Hysteria2Config{
-		Server:   u.Hostname(),
+		Server:   host,
 		Port:     port,
-		Auth:     u.User.Username(),
-		SNI:      query.Get("sni"),
+		Auth:     auth,
+		SNI:      qValues.Get("sni"),
 		Insecure: insecure,
-		OBFS:     query.Get("obfs"),
-		OBFSPass: query.Get("obfs-password"),
+		OBFS:     qValues.Get("obfs"),
+		OBFSPass: qValues.Get("obfs-password"),
 		Remark:   remark,
 	}
 
-	// [၂] Outbound တွေက လှမ်းသုံးမယ့် StreamField ကို Initialize လုပ်ပေးပါ
+	// StreamField setup
 	p.StreamField = &StreamField{
 		Network:          "udp",
 		StreamSecurity:   "tls",
 		ServerName:       p.Config.SNI,
-		TLSAllowInsecure: query.Get("insecure"),
+		TLSAllowInsecure: insecure,
 	}
 
-	jsonData, err := json.MarshalIndent(p.Config, "", "  ")
-	if err != nil {
-		return ""
-	}
-	return string(jsonData)
+	return nil
 }
 
-// [၃] Outbound logic က ခေါ်သုံးမယ့် Method များ (ဒါတွေမပါရင် Build ကျပါလိမ့်မယ်)
+// GetAddr returns server address
 func (p *ParserHysteria2) GetAddr() string {
 	return p.Config.Server
 }
 
+// GetPort returns server port
 func (p *ParserHysteria2) GetPort() int {
 	return p.Config.Port
 }
 
-func (p *ParserHysteria2) ShowJSON(rawUri string) {
-	result := p.Parse(rawUri)
-	fmt.Println(result)
+// ShowJSON prints Hysteria2Config in JSON
+func (p *ParserHysteria2) ShowJSON() {
+	data, _ := json.MarshalIndent(p.Config, "", "  ")
+	fmt.Println(string(data))
 }
 
+// Helper function to split host:port safely
+func netSplitHostPort(hostport string) (host, port string, err error) {
+	parts := strings.Split(hostport, ":")
+	if len(parts) < 2 {
+		err = fmt.Errorf("invalid host:port")
+		return
+	}
+	host = strings.Join(parts[:len(parts)-1], ":")
+	port = parts[len(parts)-1]
+	return
+}
