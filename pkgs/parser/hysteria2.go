@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 type Hysteria2Config struct {
@@ -15,12 +16,14 @@ type Hysteria2Config struct {
 	Insecure bool   `json:"insecure"`
 	OBFS     string `json:"obfs,omitempty"`
 	OBFSPass string `json:"obfs_password,omitempty"`
+	UpMbps   int    `json:"up_mbps,omitempty"`
+	DownMbps int    `json:"down_mbps,omitempty"`
 	Remark   string `json:"remark,omitempty"`
 }
 
 type ParserHysteria2 struct {
 	Config      Hysteria2Config
-	StreamField *StreamField // [၁] StreamField Pointer ထည့်ပေးပါ (Outbound logic အတွက်)
+	StreamField *StreamField
 }
 
 func (p *ParserHysteria2) Parse(rawUri string) string {
@@ -29,16 +32,25 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 		return ""
 	}
 
+	// Remark/Tag parsing
 	remark := u.Fragment
 	if remark != "" {
-		if decodedRemark, err := url.QueryUnescape(remark); err == nil {
-			remark = decodedRemark
+		if decoded, err := url.QueryUnescape(remark); err == nil {
+			remark = decoded
 		}
 	}
 
 	port, _ := strconv.Atoi(u.Port())
 	query := u.Query()
-	insecure := query.Get("insecure") == "1" || query.Get("allow_insecure") == "1"
+
+	// Insecure logic
+	insVal := strings.ToLower(query.Get("insecure"))
+	allowIns := strings.ToLower(query.Get("allow_insecure"))
+	insecure := insVal == "1" || insVal == "true" || allowIns == "1" || allowIns == "true"
+
+	// BDP/Bandwidth logic
+	up, _ := strconv.Atoi(query.Get("upmbps"))
+	down, _ := strconv.Atoi(query.Get("downmbps"))
 
 	p.Config = Hysteria2Config{
 		Server:   u.Hostname(),
@@ -48,35 +60,22 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 		Insecure: insecure,
 		OBFS:     query.Get("obfs"),
 		OBFSPass: query.Get("obfs-password"),
+		UpMbps:   up,
+		DownMbps: down,
 		Remark:   remark,
 	}
 
-	// [၂] Outbound တွေက လှမ်းသုံးမယ့် StreamField ကို Initialize လုပ်ပေးပါ
+	// StreamField mapping for general outbound use
 	p.StreamField = &StreamField{
 		Network:          "udp",
 		StreamSecurity:   "tls",
 		ServerName:       p.Config.SNI,
-		TLSAllowInsecure: query.Get("insecure"),
+		TLSAllowInsecure: strconv.FormatBool(insecure),
 	}
 
-	jsonData, err := json.MarshalIndent(p.Config, "", "  ")
-	if err != nil {
-		return ""
-	}
+	jsonData, _ := json.MarshalIndent(p.Config, "", "  ")
 	return string(jsonData)
 }
 
-// [၃] Outbound logic က ခေါ်သုံးမယ့် Method များ (ဒါတွေမပါရင် Build ကျပါလိမ့်မယ်)
-func (p *ParserHysteria2) GetAddr() string {
-	return p.Config.Server
-}
-
-func (p *ParserHysteria2) GetPort() int {
-	return p.Config.Port
-}
-
-func (p *ParserHysteria2) ShowJSON(rawUri string) {
-	result := p.Parse(rawUri)
-	fmt.Println(result)
-}
-
+func (p *ParserHysteria2) GetAddr() string { return p.Config.Server }
+func (p *ParserHysteria2) GetPort() int    { return p.Config.Port }
