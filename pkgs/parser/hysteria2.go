@@ -52,10 +52,16 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 	up, _ := strconv.Atoi(query.Get("upmbps"))
 	down, _ := strconv.Atoi(query.Get("downmbps"))
 
+	// Auth (Password) ကို Unescape လုပ်ပေးခြင်းဖြင့် Symbol ပြဿနာကို ဖြေရှင်းမယ်
+	auth := u.User.Username()
+	if decodedAuth, err := url.QueryUnescape(auth); err == nil {
+		auth = decodedAuth
+	}
+
 	p.Config = Hysteria2Config{
 		Server:   u.Hostname(),
 		Port:     port,
-		Auth:     u.User.Username(),
+		Auth:     auth,
 		SNI:      query.Get("sni"),
 		Insecure: insecure,
 		OBFS:     query.Get("obfs"),
@@ -65,7 +71,7 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 		Remark:   remark,
 	}
 
-	// StreamField mapping for general outbound use
+	// StreamField mapping
 	p.StreamField = &StreamField{
 		Network:          "udp",
 		StreamSecurity:   "tls",
@@ -79,3 +85,8 @@ func (p *ParserHysteria2) Parse(rawUri string) string {
 
 func (p *ParserHysteria2) GetAddr() string { return p.Config.Server }
 func (p *ParserHysteria2) GetPort() int    { return p.Config.Port }
+
+// Show method ထည့်ထားခြင်းဖြင့် fmt imported but not used error ကို ဖြေရှင်းပါတယ်
+func (p *ParserHysteria2) Show() {
+	fmt.Printf("Hysteria2 Config: %s:%d (SNI: %s)\n", p.Config.Server, p.Config.Port, p.Config.SNI)
+}
