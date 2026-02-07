@@ -62,22 +62,35 @@ func (that *ParserSS) Parse(rawUri string) {
 	that.Port, _ = strconv.Atoi(u.Port())
 
 	userInfo := u.User.String()
+	// [၁] userInfo ကို အရင် Unescape လုပ်မယ် ( + တွေ space မဖြစ်သွားအောင်)
+	if decodedInfo, err := url.QueryUnescape(userInfo); err == nil {
+		userInfo = decodedInfo
+	}
+
+	// [၂] Base64 Decode logic (UserInfo ထဲမှာ ":" မပါရင်)
 	if !strings.Contains(userInfo, ":") {
 		decoded, err := base64.StdEncoding.DecodeString(userInfo)
 		if err != nil {
-			decoded, _ = base64.RawStdEncoding.DecodeString(userInfo)
+			// URL safe base64 ကိုပါ စမ်းဖတ်မယ်
+			decoded, _ = base64.URLEncoding.DecodeString(userInfo)
+			if decoded == nil {
+				decoded, _ = base64.RawStdEncoding.DecodeString(userInfo)
+			}
 		}
-		userInfo = string(decoded)
+		if decoded != nil {
+			userInfo = string(decoded)
+		}
 	}
 
 	parts := strings.SplitN(userInfo, ":", 2)
 	if len(parts) == 2 {
 		that.Method = parts[0]
-		that.Password = parts[1]
+		// Password ကိုလည်း တစ်ခါထပ် Unescape လုပ်ပေးခြင်းက ပိုစိတ်ချရပါတယ်
+		pass, _ := url.QueryUnescape(parts[1])
+		that.Password = pass
 	} else {
 		that.Method = parts[0]
 	}
-
 	if that.Method == "rc4" { that.Method = "rc4-md5" }
 	if _, ok := SSMethod[that.Method]; !ok { that.Method = "none" }
 
@@ -111,3 +124,4 @@ func (that *ParserSS) Show() {
 		that.Method,
 		that.Password)
 }
+
