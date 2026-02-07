@@ -6,220 +6,87 @@ import (
 	"strings"
 
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
-	"github.com/ngwayzinmoe/uri-to-json/pkgs/utils"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
-/*
-Transport:
-http://sing-box.sagernet.org/zh/configuration/shared/v2ray-transport/
-
-HTTP:
-{
-  "type": "http",
-  "host": [],
-  "path": "",
-  "method": "",
-  "headers": {},
-  "idle_timeout": "15s",
-  "ping_timeout": "15s"
-}
-
-WebSocket:
-{
-  "type": "ws",
-  "path": "",
-  "headers": {},
-  "max_early_data": 0,
-  "early_data_header_name": ""
-}
-
-GRPC:
-{
-  "type": "grpc",
-  "service_name": "TunService",
-  "idle_timeout": "15s",
-  "ping_timeout": "15s",
-  "permit_without_stream": false
-}
-
-QUIC:
-{
-  "type": "quic"
-}
-
-TLS:
-http://sing-box.sagernet.org/zh/configuration/shared/tls/
-
-{
-  "enabled": true,
-  "disable_sni": false,
-  "server_name": "",
-  "insecure": false,
-  "alpn": [],
-  "min_version": "",
-  "max_version": "",
-  "cipher_suites": [],
-  "certificate": "",
-  "certificate_path": "",
-  "ech": {
-    "enabled": false,
-    "pq_signature_schemes_enabled": false,
-    "dynamic_record_sizing_disabled": false,
-    "config": ""
-  },
-  "utls": {
-    "enabled": false,
-    "fingerprint": ""
-  },
-  "reality": {
-    "enabled": false,
-    "public_key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
-    "short_id": "0123456789abcdef"
-  }
-}
-*/
-
-var SingHTTPandTCP string = `{
-	"type": "http",
-	"host": [],
-	"path": ""
-}`
-
-var SingHTTPHeaders string = `{
-	"Host": []
-}`
-
-var SingWebSocket string = `{
-	"type": "ws",
-	"path": ""
-}`
-
-var SingWebsocketHeaders string = `{
-	"Host": ""
-}`
-
-var SingGRPC string = `{
-	"type": "grpc",
-	"service_name": ""
-}`
-
-var SingTLS string = `{
-	"enabled": true,
-	"disable_sni": false,
-	"server_name": "",
-	"insecure": false,
-  }`
-
-var SinguTLS string = `{
-	"enabled": false,
-	"fingerprint": ""
-}`
-
-var SingReality string = `{
-	"enabled": false,
-	"public_key": "",
-	"short_id": ""
-}`
-
+// PrepareStreamStr က Parser ဆီကရတဲ့ StreamField data တွေကို Sing-box JSON format ထဲ ထည့်ပေးတာပါ
 func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Json) {
-	var tp string
-	// အကယ်၍ network က plain tcp ဖြစ်နေရင် sing-box မှာ transport မလိုပါ
-	if sf.Network == "" {
-		sf.Network = "tcp"
+	if sf == nil || cnf == nil {
+		return cnf
 	}
 
+	// [၁] Shadowsocks UDP over TCP (UoT) - Gaming အတွက် အရေးကြီးပါတယ်
+	if sf.UoT {
+		cnf.Set("udp_over_tcp", true)
+	}
+
+	// [၂] Transport (Network) Settings
+	var transport map[string]interface{}
 	switch sf.Network {
-	case "tcp", "http":
-		j := gjson.New(SingHTTPandTCP)
-		host := sf.Host
-		if host == "" {
-			host = sf.ServerName
-		}
-		if host != "" {
-			j.Set("host.0", host)
-			h := gjson.New(SingHTTPHeaders)
-			h.Set("Host.0", host)
-			j = utils.SetJsonObjectByString("headers", h.MustToJsonString(), j)
-		}
-		if sf.Path != "" {
-			SetPathForSingBoxTransport(sf.Path, j)
-		}
-		tp = j.MustToJsonString()
 	case "ws":
-		j := gjson.New(SingWebSocket)
-		host := sf.Host
-		if host == "" {
-			host = sf.ServerName
+		ws := map[string]interface{}{
+			"type": "ws",
+			"path": sf.Path,
 		}
-		if host != "" {
-			// WebSocket header ပြင်ဆင်မှု
-			j.Set("headers.Host", host)
+		if sf.Host != "" {
+			ws["headers"] = map[string]string{"Host": sf.Host}
 		}
-		if sf.Path == "" {
-			sf.Path = "/"
-		}
-		SetPathForSingBoxTransport(sf.Path, j)
-		tp = j.MustToJsonString()
+		// URL path ထဲကနေ max_early_data (ed) ကို ဆွဲထုတ်ဖို့ helper function သုံးမယ်
+		tempJ := gjson.New(ws)
+		SetPathForSingBoxTransport(sf.Path, tempJ)
+		transport = tempJ.Map()
+
 	case "grpc":
-		j := gjson.New(SingGRPC)
-		j.Set("service_name", sf.GRPCServiceName)
-		tp = j.MustToJsonString()
-	default:
-		tp = "" // default protocol များအတွက်
+		transport = map[string]interface{}{
+			"type":         "grpc",
+			"service_name": sf.GRPCServiceName,
+		}
 	}
 
-	if tp != "" && tp != "{}" {
-		cnf = utils.SetJsonObjectByString("transport", tp, cnf)
+	if transport != nil {
+		cnf.Set("transport", transport)
 	}
 
-	// TLS / Reality Settings
-	var tlsStr string
-	// Shadowsocks Plugin တွေမှာ "tls" လို့ပါရင် security ကို tls လို့ သတ်မှတ်ပေးရမယ်
+	// [၃] TLS / Reality Security Settings
 	if sf.StreamSecurity == "tls" || sf.StreamSecurity == "reality" {
-		j := gjson.New(SingTLS)
-		if sf.ServerName == "" {
-			sf.ServerName = sf.Host
+		tls := map[string]interface{}{
+			"enabled":     true,
+			"server_name": sf.ServerName,
+			"insecure":    gconv.Bool(sf.TLSAllowInsecure),
 		}
-		j.Set("enabled", true)
-		j.Set("server_name", sf.ServerName)
-		
-		allowInsecure := false
-		if sf.TLSAllowInsecure != "" {
-			allowInsecure = gconv.Bool(sf.TLSAllowInsecure)
-		}
-		j.Set("insecure", allowInsecure)
 
+		// uTLS Fingerprint (chrome, safari စတာတွေအတွက်)
 		if sf.Fingerprint != "" {
-			utls := gjson.New(SinguTLS)
-			utls.Set("enabled", true)
-			utls.Set("fingerprint", sf.Fingerprint)
-			j = utils.SetJsonObjectByString("utls", utls.MustToJsonString(), j)
+			tls["utls"] = map[string]interface{}{
+				"enabled":     true,
+				"fingerprint": sf.Fingerprint,
+			}
 		}
 
+		// Reality settings
 		if sf.StreamSecurity == "reality" {
-			reality := gjson.New(SingReality)
-			reality.Set("enabled", true)
-			reality.Set("short_id", sf.RealityShortId)
-			reality.Set("public_key", sf.RealityPublicKey)
-			j = utils.SetJsonObjectByString("reality", reality.MustToJsonString(), j)
+			tls["reality"] = map[string]interface{}{
+				"enabled":    true,
+				"public_key": sf.RealityPublicKey,
+				"short_id":   sf.RealityShortId,
+			}
 		}
-		tlsStr = j.MustToJsonString()
+		cnf.Set("tls", tls)
 	}
 
-	if tlsStr != "" {
-		cnf = utils.SetJsonObjectByString("tls", tlsStr, cnf)
-	}
 	result = cnf
 	return
 }
+
+// --- အောက်က Helper Functions တွေကိုလည်း မဖျက်ဘဲ ထားပေးပါ ---
 
 func SetPathForSingBoxTransport(pathStr string, j *gjson.Json) {
 	if u := ParseSingBoxPathToURL(pathStr); u != nil {
 		if uPath := u.Path; uPath != "" {
 			j.Set("path", uPath)
 		}
+		// path ထဲမှာ ed=2048 စသဖြင့် ပါလာရင် sing-box transport ထဲ ထည့်ပေးတာပါ
 		if ed, err := strconv.Atoi(u.Query().Get("ed")); err == nil && ed > 0 {
 			j.Set("max_early_data", ed)
 			j.Set("early_data_header_name", "Sec-WebSocket-Protocol")
