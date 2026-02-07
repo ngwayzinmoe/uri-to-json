@@ -1,44 +1,40 @@
 package parser
 
 import (
-	"fmt"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
-/*
-   Supported methods (Xray-safe focused)
-*/
 var SSMethod = map[string]struct{}{
 	"aes-128-gcm":            {},
 	"aes-256-gcm":            {},
 	"chacha20-ietf-poly1305": {},
 	"xchacha20-ietf-poly1305": {},
+	"none":                   {},
 }
 
-/*
-   Result model
-*/
 type ParserSS struct {
 	Address  string
 	Port     int
 	Method   string
 	Password string
 	Remark   string
+	// အရင်ကပါတဲ့ StreamField ကိုလည်း ပြန်ထည့်ထားပေးပါတယ် (XUDP/UoT အတွက်)
+	*StreamField
 }
 
-/*
-   Entry
-*/
 func (p *ParserSS) Parse(raw string) error {
 	if !strings.HasPrefix(raw, "ss://") {
 		return errors.New("not ss://")
 	}
 
-	// -------- fragment / remark --------
+	p.StreamField = &StreamField{} // Initialize StreamField
+
+	// Remark Parsing
 	if i := strings.Index(raw, "#"); i != -1 {
 		p.Remark, _ = url.QueryUnescape(raw[i+1:])
 		raw = raw[:i]
@@ -46,28 +42,28 @@ func (p *ParserSS) Parse(raw string) error {
 
 	raw = strings.TrimPrefix(raw, "ss://")
 
-	// -------- SIP002 format --------
-	// ss://BASE64(method:password)@host:port
+	// SIP002 format (method:pass@host:port)
 	if strings.Contains(raw, "@") {
 		return p.parseSIP002(raw)
 	}
 
-	// -------- Classic format --------
-	// ss://BASE64(method:password@host:port)
+	// Classic format (BASE64 ONLY)
 	return p.parseClassic(raw)
 }
 
-/*
-   SIP002
-*/
 func (p *ParserSS) parseSIP002(raw string) error {
 	parts := strings.SplitN(raw, "@", 2)
 	if len(parts) != 2 {
 		return errors.New("invalid sip002")
 	}
 
-	// decode userinfo
-	userBytes, err := decodeSSBase64(parts[0])
+	// [၁] UserInfo (Method:Pass) ကို Unescape လုပ်ပြီးမှ Decode လုပ်မယ်
+	userInfoRaw := parts[0]
+	if decodedInfo, err := url.QueryUnescape(userInfoRaw); err == nil {
+		userInfoRaw = decodedInfo
+	}
+
+	userBytes, err := decodeSSBase64(userInfoRaw)
 	if err != nil {
 		return err
 	}
@@ -79,31 +75,37 @@ func (p *ParserSS) parseSIP002(raw string) error {
 	}
 
 	p.Method = normalizeMethod(mp[0])
-	p.Password = mp[1]
+	
+	// [၂] Password ထဲက Special Character တွေကို Unescape လုပ်ပေးမယ်
+	pass, _ := url.QueryUnescape(mp[1])
+	p.Password = pass
 
-	host, portStr, ok := strings.Cut(parts[1], ":")
-	if !ok {
-		return errors.New("invalid host:port")
+	// Host:Port & Query params
+	hostPart := parts[1]
+	// URL parse သုံးပြီး Query ပါရင် handle လုပ်မယ်
+	u, err := url.Parse("http://" + hostPart)
+	if err != nil {
+		return err
 	}
 
-	p.Address = host
-	p.Port, _ = strconv.Atoi(portStr)
+	p.Address = u.Hostname()
+	p.Port, _ = strconv.Atoi(u.Port())
+
+	// UoT Logic (Query ထဲမှာ uot=1 ပါရင် ဖွင့်ပေးမယ်)
+	if u.Query().Get("uot") == "1" {
+		p.StreamField.UoT = true
+	}
 
 	return p.validate()
 }
 
-/*
-   Classic
-*/
 func (p *ParserSS) parseClassic(raw string) error {
 	decoded, err := decodeSSBase64(raw)
 	if err != nil {
 		return err
 	}
 
-	// method:password@host:port
 	s := string(decoded)
-
 	mpHost := strings.SplitN(s, "@", 2)
 	if len(mpHost) != 2 {
 		return errors.New("invalid classic ss")
@@ -115,7 +117,10 @@ func (p *ParserSS) parseClassic(raw string) error {
 	}
 
 	p.Method = normalizeMethod(mp[0])
-	p.Password = mp[1]
+	
+	// Password Unescape
+	pass, _ := url.QueryUnescape(mp[1])
+	p.Password = pass
 
 	host, portStr, ok := strings.Cut(mpHost[1], ":")
 	if !ok {
@@ -128,65 +133,39 @@ func (p *ParserSS) parseClassic(raw string) error {
 	return p.validate()
 }
 
-/*
-   Validation
-*/
 func (p *ParserSS) validate() error {
 	if p.Address == "" || p.Port <= 0 {
 		return errors.New("invalid address or port")
 	}
-	if _, ok := SSMethod[p.Method]; !ok {
-		return errors.New("unsupported method")
-	}
 	return nil
 }
 
-/*
-   Method normalize
-*/
 func normalizeMethod(m string) string {
 	m = strings.ToLower(m)
-	if m == "rc4" {
-		m = "rc4-md5"
-	}
+	if m == "rc4" { return "rc4-md5" }
 	return m
 }
 
-/*
-   Robust Base64 decode
-*/
 func decodeSSBase64(s string) ([]byte, error) {
+	// Base64 padding and URL safety
 	s = strings.ReplaceAll(s, "-", "+")
 	s = strings.ReplaceAll(s, "_", "/")
 
 	switch len(s) % 4 {
-	case 2:
-		s += "=="
-	case 3:
-		s += "="
+	case 2: s += "=="
+	case 3: s += "="
 	}
 
-	return base64.StdEncoding.DecodeString(s)
+	// [၃] base64 decode logic ပိုခိုင်မာအောင် လုပ်ခြင်း
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		b, err = base64.RawStdEncoding.DecodeString(s)
+	}
+	return b, err
 }
 
 func (p *ParserSS) Show() {
-	if p == nil {
-		fmt.Println("SS: <nil>")
-		return
-	}
-
-	fmt.Printf(
-		"SS => addr: %s, port: %d, method: %s, password: %s",
-		p.Address,
-		p.Port,
-		p.Method,
-		p.Password,
-	)
-
-	if p.Remark != "" {
-		fmt.Printf(", remark: %s", p.Remark)
-	}
-
-	fmt.Println()
+	if p == nil { return }
+	fmt.Printf("SS => addr: %s, port: %d, method: %s, pass: %s, uot: %v\n", 
+		p.Address, p.Port, p.Method, p.Password, p.StreamField.UoT)
 }
-
