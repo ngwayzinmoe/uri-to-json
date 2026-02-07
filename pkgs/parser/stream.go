@@ -9,7 +9,7 @@ type StreamField struct {
 
 	// TLS / SNI Settings
 	ServerName       string `json:"server_name"`        // SNI (Server Name Indication)
-	TLSAllowInsecure string `json:"tls_allow_insecure"` // "true" or "false"
+	TLSAllowInsecure bool` // "true" or "false"
 	TLSALPN          string `json:"tls_alpn"`           // h2, http/1.1
 	Fingerprint      string `json:"fingerprint"`        // chrome, firefox, safari, edge, ios, etc.
 
@@ -39,3 +39,4 @@ type StreamField struct {
 	MaxEarlyData    int    `json:"max_early_data"`
 	EarlyDataHeader string `json:"early_data_header"` // Sec-WebSocket-Protocol
 }
+
