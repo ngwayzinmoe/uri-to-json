@@ -23,6 +23,11 @@ type ParserSS struct {
 	Method   string
 	Password string
 	Remark   string
+	Plugin string
+	OBFS string
+	OBFSHost string
+	Mode string
+	
 	// အရင်ကပါတဲ့ StreamField ကိုလည်း ပြန်ထည့်ထားပေးပါတယ် (XUDP/UoT အတွက်)
 	*StreamField
 }
@@ -91,8 +96,15 @@ func (p *ParserSS) parseSIP002(raw string) error {
 	p.Address = u.Hostname()
 	p.Port, _ = strconv.Atoi(u.Port())
 
+	//Query Plugin data into model
+	query := u.Query()
+	p.Plugin = query.Get("plugin")
+	p.OBFS = query.Get("obfs")
+	p.OBFSHost = query.Get("obfs-host")
+	p.Mode = query.Get("mode")
+
 	// UoT Logic (Query ထဲမှာ uot=1 ပါရင် ဖွင့်ပေးမယ်)
-	if u.Query().Get("uot") == "1" {
+	if query.Get("uot") == "1" {
 		p.StreamField.UoT = true
 	}
 
@@ -169,3 +181,4 @@ func (p *ParserSS) Show() {
 	fmt.Printf("SS => addr: %s, port: %d, method: %s, pass: %s, uot: %v\n", 
 		p.Address, p.Port, p.Method, p.Password, p.StreamField.UoT)
 }
+
