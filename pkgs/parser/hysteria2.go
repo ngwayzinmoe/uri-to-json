@@ -8,85 +8,115 @@ import (
 	"strings"
 )
 
+// Hysteria2Config represents a Hysteria2 server configuration
 type Hysteria2Config struct {
 	Server   string `json:"server"`
 	Port     int    `json:"port"`
 	Auth     string `json:"auth"`
-	SNI      string `json:"sni"`
+	SNI      string `json:"sni,omitempty"`
 	Insecure bool   `json:"insecure"`
 	OBFS     string `json:"obfs,omitempty"`
 	OBFSPass string `json:"obfs_password,omitempty"`
-	UpMbps   int    `json:"up_mbps,omitempty"`
-	DownMbps int    `json:"down_mbps,omitempty"`
 	Remark   string `json:"remark,omitempty"`
 }
 
+// ParserHysteria2 parses hysteria:// URIs
 type ParserHysteria2 struct {
 	Config      Hysteria2Config
-	StreamField *StreamField
+	StreamField *StreamField // for outbound use
 }
 
-func (p *ParserHysteria2) Parse(rawUri string) string {
-	u, err := url.Parse(rawUri)
+// Parse parses a hysteria:// URI into Hysteria2Config
+func (p *ParserHysteria2) Parse(rawUri string) error {
+	if !strings.HasPrefix(rawUri, "hysteria://") {
+		return fmt.Errorf("invalid hysteria URI")
+	}
+
+	// remove scheme
+	rawUri = strings.TrimPrefix(rawUri, "hysteria://")
+
+	// split fragment (#...)
+	remark := ""
+	if idx := strings.Index(rawUri, "#"); idx != -1 {
+		remark, _ = url.QueryUnescape(rawUri[idx+1:])
+		rawUri = rawUri[:idx]
+	}
+
+	// parse query
+	var queryStr string
+	if idx := strings.Index(rawUri, "?"); idx != -1 {
+		queryStr = rawUri[idx+1:]
+		rawUri = rawUri[:idx]
+	}
+
+	// parse user info and host:port
+	userHost := strings.SplitN(rawUri, "@", 2)
+	if len(userHost) != 2 {
+		return fmt.Errorf("invalid hysteria URI, missing auth or host")
+	}
+
+	auth := userHost[0]
+	hostPort := userHost[1]
+
+	host, portStr, err := netSplitHostPort(hostPort)
 	if err != nil {
-		return ""
+		return err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("invalid port: %v", err)
 	}
 
-	// Remark/Tag parsing
-	remark := u.Fragment
-	if remark != "" {
-		if decoded, err := url.QueryUnescape(remark); err == nil {
-			remark = decoded
-		}
-	}
-
-	port, _ := strconv.Atoi(u.Port())
-	query := u.Query()
-
-	// Insecure logic
-	insVal := strings.ToLower(query.Get("insecure"))
-	allowIns := strings.ToLower(query.Get("allow_insecure"))
-	insecure := insVal == "1" || insVal == "true" || allowIns == "1" || allowIns == "true"
-
-	// BDP/Bandwidth logic
-	up, _ := strconv.Atoi(query.Get("upmbps"))
-	down, _ := strconv.Atoi(query.Get("downmbps"))
-
-	// Auth (Password) ကို Unescape လုပ်ပေးခြင်းဖြင့် Symbol ပြဿနာကို ဖြေရှင်းမယ်
-	auth := u.User.Username()
-	if decodedAuth, err := url.QueryUnescape(auth); err == nil {
-		auth = decodedAuth
-	}
+	// parse query parameters
+	qValues, _ := url.ParseQuery(queryStr)
+	insecure := qValues.Get("insecure") == "1" || qValues.Get("allow_insecure") == "1"
 
 	p.Config = Hysteria2Config{
-		Server:   u.Hostname(),
+		Server:   host,
 		Port:     port,
 		Auth:     auth,
-		SNI:      query.Get("sni"),
+		SNI:      qValues.Get("sni"),
 		Insecure: insecure,
-		OBFS:     query.Get("obfs"),
-		OBFSPass: query.Get("obfs-password"),
-		UpMbps:   up,
-		DownMbps: down,
+		OBFS:     qValues.Get("obfs"),
+		OBFSPass: qValues.Get("obfs-password"),
 		Remark:   remark,
 	}
 
-	// StreamField mapping
+	// StreamField setup
 	p.StreamField = &StreamField{
 		Network:          "udp",
 		StreamSecurity:   "tls",
 		ServerName:       p.Config.SNI,
-		TLSAllowInsecure: strconv.FormatBool(insecure),
+		TLSAllowInsecure: insecure,
 	}
 
-	jsonData, _ := json.MarshalIndent(p.Config, "", "  ")
-	return string(jsonData)
+	return nil
 }
 
-func (p *ParserHysteria2) GetAddr() string { return p.Config.Server }
-func (p *ParserHysteria2) GetPort() int    { return p.Config.Port }
+// GetAddr returns server address
+func (p *ParserHysteria2) GetAddr() string {
+	return p.Config.Server
+}
 
-// Show method ထည့်ထားခြင်းဖြင့် fmt imported but not used error ကို ဖြေရှင်းပါတယ်
-func (p *ParserHysteria2) Show() {
-	fmt.Printf("Hysteria2 Config: %s:%d (SNI: %s)\n", p.Config.Server, p.Config.Port, p.Config.SNI)
+// GetPort returns server port
+func (p *ParserHysteria2) GetPort() int {
+	return p.Config.Port
+}
+
+// ShowJSON prints Hysteria2Config in JSON
+func (p *ParserHysteria2) ShowJSON() {
+	data, _ := json.MarshalIndent(p.Config, "", "  ")
+	fmt.Println(string(data))
+}
+
+// Helper function to split host:port safely
+func netSplitHostPort(hostport string) (host, port string, err error) {
+	parts := strings.Split(hostport, ":")
+	if len(parts) < 2 {
+		err = fmt.Errorf("invalid host:port")
+		return
+	}
+	host = strings.Join(parts[:len(parts)-1], ":")
+	port = parts[len(parts)-1]
+	return
 }
