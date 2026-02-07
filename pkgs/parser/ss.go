@@ -2,7 +2,7 @@ package parser
 
 import (
 	"encoding/base64"
-	"fmt"
+	"fmt" // fmt ကို ထည့်သွင်းလိုက်ပါပြီ
 	"net/url"
 	"strconv"
 	"strings"
@@ -47,7 +47,6 @@ type ParserSS struct {
 }
 
 func (that *ParserSS) Parse(rawUri string) {
-	// Fragments (#...) ကို ခဏဖယ်ထားမယ် (Remark တွေအတွက်)
 	if idx := strings.Index(rawUri, "#"); idx != -1 {
 		rawUri = rawUri[:idx]
 	}
@@ -63,21 +62,14 @@ func (that *ParserSS) Parse(rawUri string) {
 	that.Port, _ = strconv.Atoi(u.Port())
 
 	userInfo := u.User.String()
-	// အကယ်၍ UserInfo ထဲမှာ ':' မပါရင် ဒါဟာ Base64 ဖြစ်ဖို့များတယ်
 	if !strings.Contains(userInfo, ":") {
 		decoded, err := base64.StdEncoding.DecodeString(userInfo)
-		if err == nil {
-			userInfo = string(decoded)
-		} else {
-			// တချို့ Base64 တွေက Padding (=) မပါတတ်လို့ RawStdEncoding နဲ့ပါ စမ်းမယ်
-			decoded, err = base64.RawStdEncoding.DecodeString(userInfo)
-			if err == nil {
-				userInfo = string(decoded)
-			}
+		if err != nil {
+			decoded, _ = base64.RawStdEncoding.DecodeString(userInfo)
 		}
+		userInfo = string(decoded)
 	}
 
-	// Method နဲ့ Password ခွဲမယ်
 	parts := strings.SplitN(userInfo, ":", 2)
 	if len(parts) == 2 {
 		that.Method = parts[0]
@@ -86,13 +78,8 @@ func (that *ParserSS) Parse(rawUri string) {
 		that.Method = parts[0]
 	}
 
-	// Alias တွေ ပြင်မယ်
-	if that.Method == "rc4" {
-		that.Method = "rc4-md5"
-	}
-	if _, ok := SSMethod[that.Method]; !ok {
-		that.Method = "none"
-	}
+	if that.Method == "rc4" { that.Method = "rc4-md5" }
+	if _, ok := SSMethod[that.Method]; !ok { that.Method = "none" }
 
 	query := u.Query()
 	that.Host = query.Get("host")
@@ -102,20 +89,21 @@ func (that *ParserSS) Parse(rawUri string) {
 	that.Plugin = query.Get("plugin")
 	that.OBFS = query.Get("obfs")
 	that.OBFSHost = query.Get("obfs-host")
+
+	// UoT Logic
+	if query.Get("uot") == "1" || that.Mode == "websocket" {
+		that.StreamField.UoT = true
+	}
 }
 
 func (that *ParserSS) handleSS(rawUri string) string {
 	return strings.ReplaceAll(rawUri, "#ss#\u00261@", "@")
 }
 
-func (that *ParserSS) GetAddr() string {
-	return that.Address
-}
+func (that *ParserSS) GetAddr() string { return that.Address }
+func (that *ParserSS) GetPort() int    { return that.Port }
 
-func (that *ParserSS) GetPort() int {
-	return that.Port
-}
-
+// Show() function အတွက် fmt က အခု အလုပ်လုပ်ပါပြီ
 func (that *ParserSS) Show() {
 	fmt.Printf("addr: %s, port: %d, method: %s, password: %s\n",
 		that.Address,
