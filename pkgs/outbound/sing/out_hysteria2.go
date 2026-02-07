@@ -18,9 +18,6 @@ func (that *SHysteria2Out) Parse(rawUri string) {
 	that.Parser.Parse(rawUri)
 }
 
-func (that *SHysteria2Out) Addr() string { return that.Parser.GetAddr() }
-func (that *SHysteria2Out) Port() int    { return that.Parser.GetPort() }
-
 func (that *SHysteria2Out) GetOutboundStr() string {
 	if that.Parser.Config.Server == "" {
 		return ""
@@ -33,7 +30,7 @@ func (that *SHysteria2Out) GetOutboundStr() string {
 		j.Set("server_port", that.Parser.Config.Port)
 		j.Set("password", that.Parser.Config.Auth)
 
-		// BDP (Bandwidth Control)
+		// BDP bandwidth control
 		if that.Parser.Config.UpMbps > 0 {
 			j.Set("up_mbps", that.Parser.Config.UpMbps)
 		}
@@ -41,23 +38,22 @@ func (that *SHysteria2Out) GetOutboundStr() string {
 			j.Set("down_mbps", that.Parser.Config.DownMbps)
 		}
 
-		// TLS Object
-		tlsConf := map[string]interface{}{
+		// TLS
+		j.Set("tls", map[string]interface{}{
 			"enabled":     true,
 			"server_name": that.Parser.Config.SNI,
 			"insecure":    that.Parser.Config.Insecure,
-		}
-		j.Set("tls", tlsConf)
+		})
 
-		// OBFS Object (Salamander support)
+		// OBFS
 		if that.Parser.Config.OBFS != "" {
-			obfsConf := map[string]interface{}{
+			obfs := map[string]interface{}{
 				"type": that.Parser.Config.OBFS,
 			}
 			if that.Parser.Config.OBFSPass != "" {
-				obfsConf["password"] = that.Parser.Config.OBFSPass
+				obfs["password"] = that.Parser.Config.OBFSPass
 			}
-			j.Set("obfs", obfsConf)
+			j.Set("obfs", obfs)
 		}
 
 		that.outbound = j.MustToJsonString()
