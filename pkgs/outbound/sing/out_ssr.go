@@ -91,7 +91,7 @@ func (that *SShadowSocksROut) getSettings() string {
 	if that.Parser.Address == "" || that.Parser.Port == 0 {
 		return "{}"
 	}
-	j := gjson.New(SingSSR)
+	j := gjson.New(SingSS)
 	j.Set("type", "shadowsocksr")
 	j.Set("server", that.Parser.Address)
 	j.Set("server_port", that.Parser.Port)
