@@ -87,7 +87,7 @@ func (p *ParserHysteria2) Parse(rawUri string) error {
 		Network:          "udp",
 		StreamSecurity:   "tls",
 		ServerName:       p.Config.SNI,
-		TLSAllowInsecure: insecure,
+		TLSAllowInsecure: strconv.FormatBool(insecure), //bool to "true" or "false"
 	}
 
 	return nil
