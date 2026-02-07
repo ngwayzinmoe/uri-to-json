@@ -10,7 +10,7 @@ type StreamField struct {
 	GRPCMultiMode    string
 	ServerName       string
 	TLSALPN          string
-	TLSAllowInsecure bool
+	TLSAllowInsecure string
 	Fingerprint      string
 	RealityShortId   string
 	RealitySpiderX   string
@@ -18,4 +18,5 @@ type StreamField struct {
 	PacketEncoding   string
 	UoT bool
 }
+
 
