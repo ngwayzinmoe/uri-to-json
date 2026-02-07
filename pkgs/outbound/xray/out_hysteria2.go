@@ -1,7 +1,6 @@
 package xray
 
 import (
-	"fmt"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/utils"
@@ -19,37 +18,38 @@ func (that *Hysteria2Out) Parse(rawUri string) {
 	that.Parser.Parse(rawUri)
 }
 
-func (that *Hysteria2Out) Addr() string   { return that.Parser.GetAddr() }
-func (that *Hysteria2Out) Port() int      { return that.Parser.GetPort() }
-func (that *Hysteria2Out) Scheme() string { return parser.SchemeHysteria2 }
-
 func (that *Hysteria2Out) GetOutboundStr() string {
 	if that.Parser.Config.Server == "" {
 		return ""
 	}
 	if that.outbound == "" {
+		j := gjson.New("{}")
+		j.Set("protocol", "hysteria2")
+		j.Set("tag", utils.OutboundTag)
+
 		// Settings section
-		setObj := gjson.New("{}")
-		setObj.Set("server", that.Parser.Config.Server)
-		setObj.Set("port", that.Parser.Config.Port)
-		setObj.Set("auth", that.Parser.Config.Auth)
-		if that.Parser.Config.OBFSPass != "" {
-			setObj.Set("password", that.Parser.Config.OBFSPass)
+		settings := map[string]interface{}{
+			"server":   that.Parser.Config.Server,
+			"port":     that.Parser.Config.Port,
+			"auth":     that.Parser.Config.Auth,
 		}
+		if that.Parser.Config.OBFSPass != "" {
+			settings["password"] = that.Parser.Config.OBFSPass
+		}
+		j.Set("settings", settings)
 
 		// StreamSettings section
-		streamObj := gjson.New(`{"network":"udp","security":"tls"}`)
-		streamObj.Set("tlsSettings.serverName", that.Parser.Config.SNI)
-		streamObj.Set("tlsSettings.allowInsecure", that.Parser.Config.Insecure)
+		stream := map[string]interface{}{
+			"network": "udp",
+			"security": "tls",
+			"tlsSettings": map[string]interface{}{
+				"serverName":    that.Parser.Config.SNI,
+				"allowInsecure": that.Parser.Config.Insecure,
+			},
+		}
+		j.Set("streamSettings", stream)
 
-		// Final Outbound
-		out := gjson.New("{}")
-		out.Set("protocol", "hysteria2")
-		out.Set("tag", utils.OutboundTag)
-		out.Set("settings", setObj.Map())
-		out.Set("streamSettings", streamObj.Map())
-		
-		that.outbound = out.MustToJsonString()
+		that.outbound = j.MustToJsonString()
 	}
 	return that.outbound
 }
