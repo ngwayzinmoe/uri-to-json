@@ -1,7 +1,7 @@
 package xray
 
 import (
-	"fmt"
+	
 
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/utils"
@@ -95,11 +95,4 @@ func (that *Hysteria2Out) GetOutboundStr() string {
 
 	that.outbound = outObj.MustToJsonString()
 	return that.outbound
-}
-
-func (that *ParserHysteria2) GetPort() int    { return that.Config.Port }
-
-// ဒီ logic လေး ထည့်ထားရင် fmt error မတက်တော့ပါဘူး
-func (that *ParserHysteria2) Show() {
-	fmt.Printf("Server: %s, Port: %d\n", that.Config.Server, that.Config.Port)
 }
