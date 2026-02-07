@@ -27,98 +27,57 @@ type SShadowSocksOut struct {
 }
 
 // Parse parses raw ss:// URI
-func (s *SShadowSocksOut) Parse(rawUri string) {
-	s.RawUri = rawUri
-	s.Parser = &parser.ParserSS{}
-	_ = s.Parser.Parse(rawUri) // silent fail
+func (that *SShadowSocksOut) Parse(rawUri string) {
+	that.RawUri = rawUri
+	that.Parser = &parser.ParserSS{}
+	that.Parser.Parse(rawUri)
 }
 
-// Addr returns server address
-func (s *SShadowSocksOut) Addr() string {
-	if s.Parser == nil {
-		return ""
+func (that *SShadowSocksOut) GetOutboundStr() string {
+	if that.Parser.Address == "" { return "" }
+
+	if that.outbound == "" {
+		j := gjson.New("{}")
+		j.Set("type", "shadowsocks")
+		j.Set("tag", utils.OutboundTag)
+		j.Set("server", that.Parser.Address)
+		j.Set("server_port", that.Parser.Port)
+		j.Set("method", that.Parser.Method)
+		j.Set("password", that.Parser.Password)
+		j.Set("network", "udp") // UDP packets support
+
+		// [UoT for Sing-box]
+		if that.Parser.StreamField.UoT {
+			j.Set("udp_over_tcp", map[string]interface{}{
+				"enabled": true,
+				"version": 2,
+			})
+		}
+
+		// Plugin Options logic
+		var pluginOpts []string
+		if that.Parser.Plugin != "" {
+			j.Set("plugin", that.Parser.Plugin)
+			if that.Parser.OBFS != "" {
+				pluginOpts = append(pluginOpts, fmt.Sprintf("obfs=%s", that.Parser.OBFS))
+				pluginOpts = append(pluginOpts, fmt.Sprintf("obfs-host=%s", that.Parser.OBFSHost))
+			}
+			if that.Parser.Mode != "" {
+				pluginOpts = append(pluginOpts, fmt.Sprintf("mode=%s", that.Parser.Mode))
+			}
+			if len(pluginOpts) > 0 {
+				j.Set("plugin_opts", strings.Join(pluginOpts, ";"))
+			}
+		}
+
+		// Final stream/transport settings
+		PrepareStreamStr(j, that.Parser.StreamField)
+		
+		that.outbound = j.MustToJsonString()
 	}
-	return s.Parser.Address
+	return that.outbound
 }
 
-// Port returns server port
-func (s *SShadowSocksOut) Port() int {
-	if s.Parser == nil {
-		return 0
-	}
-	return s.Parser.Port
-}
-
-// Scheme returns "ss"
-func (s *SShadowSocksOut) Scheme() string {
-	return parser.SchemeSS
-}
-
-// GetRawUri returns original ss:// URI
-func (s *SShadowSocksOut) GetRawUri() string {
-	return s.RawUri
-}
-
-// getSettings builds the Sing-box Shadowsocks outbound JSON
-func (s *SShadowSocksOut) getSettings() string {
-	if s.Parser == nil || s.Parser.Address == "" || s.Parser.Port == 0 {
-		return "{}"
-	}
-
-	j := gjson.New(SingSS)
-
-	j.Set("type", "shadowsocks")
-	j.Set("server", s.Parser.Address)
-	j.Set("server_port", s.Parser.Port)
-	j.Set("method", s.Parser.Method)
-	j.Set("password", s.Parser.Password)
-	j.Set("tag", utils.OutboundTag)
-
-	// UDP network + UDP over TCP
-	j.Set("network", "udp")
-	j.Set("udp_over_tcp", map[string]interface{}{
-		"enabled": true,
-		"version": 2,
-	})
-
-	// Optional plugin
-	if s.Parser.Plugin != "" {
-		j.Set("plugin", s.Parser.Plugin)
-	}
-
-	// Optional obfs plugin options
-	var pluginOpts []string
-	if s.Parser.OBFS != "" && s.Parser.OBFSHost != "" {
-		pluginOpts = append(pluginOpts, fmt.Sprintf("obfs=%s", s.Parser.OBFS))
-		pluginOpts = append(pluginOpts, fmt.Sprintf("obfs-host=%s", s.Parser.OBFSHost))
-	}
-
-	if s.Parser.Mode != "" {
-		pluginOpts = append(pluginOpts, fmt.Sprintf("mode=%s", s.Parser.Mode))
-	}
-
-	if len(pluginOpts) > 0 {
-		j.Set("plugin_opts", strings.Join(pluginOpts, ";"))
-	}
-
-	return j.MustToJsonString()
-}
-
-// GetOutboundStr returns finalized Sing-box outbound JSON string
-func (s *SShadowSocksOut) GetOutboundStr() string {
-	if s.outbound != "" {
-		return s.outbound
-	}
-
-	settings := s.getSettings()
-	if settings == "{}" {
-		return ""
-	}
-
-	cnf := gjson.New(settings)
-	s.outbound = cnf.MustToJsonString()
-	return s.outbound
-}
 
 // TestSS demonstrates usage
 func TestSS() {
