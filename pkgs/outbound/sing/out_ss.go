@@ -33,6 +33,29 @@ func (that *SShadowSocksOut) Parse(rawUri string) {
 	that.Parser.Parse(rawUri)
 }
 
+// Addr returns the server address
+func (that *SShadowSocksOut) Addr() string {
+	if that.Parser == nil { return "" }
+	return that.Parser.Address
+}
+
+// Port returns the server port
+func (that *SShadowSocksOut) Port() int {
+	if that.Parser == nil { return 0 }
+	return that.Parser.Port
+}
+
+// Scheme returns the protocol scheme
+func (that *SShadowSocksOut) Scheme() string {
+	return parser.SchemeSS
+}
+
+// GetRawUri returns the original URI
+func (that *SShadowSocksOut) GetRawUri() string {
+	return that.RawUri
+}
+
+
 func (that *SShadowSocksOut) GetOutboundStr() string {
 	if that.Parser.Address == "" { return "" }
 
