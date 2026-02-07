@@ -2,198 +2,58 @@ package xray
 
 import (
 	"strings"
-
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/utils"
 	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
-/*
-https://xtls.github.io/config/transport.html#streamsettingsobject
-
-{
-  "network": "tcp",
-  "security": "none",
-  "tlsSettings": {},
-  "tcpSettings": {},
-  "kcpSettings": {},
-  "wsSettings": {},
-  "httpSettings": {},
-  "quicSettings": {},
-  "dsSettings": {},
-  "grpcSettings": {},
-  "sockopt": {
-    "mark": 0,
-    "tcpFastOpen": false,
-    "tproxy": "off",
-    "domainStrategy": "AsIs",
-    "dialerProxy": "",
-    "acceptProxyProtocol": false,
-    "tcpKeepAliveInterval": 0
-  }
-}
-
-TLSSettings:
-{
-  "serverName": "xray.com",
-  "rejectUnknownSni": false,
-  "allowInsecure": false,
-  "alpn": ["h2", "http/1.1"],
-  "minVersion": "1.2",
-  "maxVersion": "1.3",
-  "cipherSuites": "此处填写你需要的加密套件名称,每个套件名称之间用:进行分隔",
-  "certificates": [],
-  "disableSystemRoot": false,
-  "enableSessionResumption": false,
-  "fingerprint": "",
-  "pinnedPeerCertificateChainSha256": [""]
-}
-
-TCPSettings:
-https://xtls.github.io/config/transports/tcp.html#tcpobject
-{
-  "acceptProxyProtocol": false,
-  "header": {
-    "type": "none"
-  }
-}
-HttpHeaderObject:
-{
-  "type": "http",
-  "request": {},
-  "response": {}
-}
-
-WSSettings:
-{
-  "acceptProxyProtocol": false,
-  "path": "/",
-  "headers": {
-    "Host": "xray.com"
-  }
-}
-
-GRPCSettings:
-{
-  "serviceName": "name",
-  "multiMode": false,
-  "user_agent": "custom user agent",
-  "idle_timeout": 60,
-  "health_check_timeout": 20,
-  "permit_without_stream": false,
-  "initial_windows_size": 0
-}
-
-HTTPSettings:
-{
-  "host": ["xray.com"],
-  "path": "/random/path",
-  "read_idle_timeout": 10,
-  "health_check_timeout": 15,
-  "method": "PUT",
-  "headers": {
-    "Header": ["value"]
-  }
-}
-
-*/
-
-var XrayStream string = `{
-	"network": "tcp",
-	"security": "none"
-}`
-
-var XrayStreamTLS string = `{
-	"serverName": "xray.com",
-	"allowInsecure": true
-}`
-
-var XrayStreamReality string = `{
-  "shortId": "",
-  "fingerprint": "",
-  "serverName": "",
-  "publicKey": "",
-  "spiderX": ""
-}`
-
-var XrayStreamTCPNone string = `{
-	"header": {
-	  "type": "none"
-	}
-}`
-
-var XrayStreamTCPHTTP string = `{
-  "header": {
-      "type": "http",
-      "request": {
-          "path": ["/"],
-          "headers": {
-              "Host": ["fast.com"]
-          }
-      }
-  }
-}`
-
-var XrayStreamWebSocket string = `{
-	"path": "/",
-	"headers": {
-	  "Host": "xray.com"
-	}
-}`
-
-var XrayStreamHTTP string = `{
-	"host": [""],
-	"path": ""
-}`
-
-var XrayStreamGRPC string = `{
-	"serviceName": "",
-	"multiMode": false
-}`
+var XrayStream string = `{"network": "tcp", "security": "none"}`
+var XrayStreamTLS string = `{"serverName": "", "allowInsecure": false}`
+var XrayStreamReality string = `{"shortId": "", "fingerprint": "", "serverName": "", "publicKey": "", "spiderX": ""}`
+var XrayStreamTCPNone string = `{"header": {"type": "none"}}`
+var XrayStreamWebSocket string = `{"path": "/", "headers": {"Host": ""}}`
+var XrayStreamGRPC string = `{"serviceName": "", "multiMode": false}`
 
 func PrepareStreamString(sf *parser.StreamField) string {
+	if sf == nil { return "{}" }
 	stream := gjson.New(XrayStream)
 	
-	// Network မရှိရင် default tcp သုံးမယ်
-	if sf.Network == "" {
-		sf.Network = "tcp"
-	}
+	if sf.Network == "" { sf.Network = "tcp" }
 	stream.Set("network", sf.Network)
 	stream.Set("security", sf.StreamSecurity)
+
+	// [၁] Packet Encoding (VLESS Reality/Trojan အတွက် အရေးကြီး)
+	if sf.PacketEncoding != "" {
+		stream.Set("packetEncoding", sf.PacketEncoding)
+	}
 
 	switch sf.Network {
 	case "tcp":
 		if sf.TCPHeaderType == "http" {
-			j := gjson.New(XrayStreamTCPHTTP)
+			j := gjson.New(`{"header":{"type":"http","request":{"path":["/"],"headers":{"Host":[""]}}}}`)
 			j.Set("header.request.path.0", sf.Path)
 			j.Set("header.request.headers.Host.0", sf.Host)
-			// Xray standard က tcpSettings ဖြစ်ပါတယ်
-			stream = utils.SetJsonObjectByString("tcpSettings", j.MustToJsonString(), stream)
+			stream.Set("tcpSettings", j.Map())
 		} else {
-			stream = utils.SetJsonObjectByString("tcpSettings", XrayStreamTCPNone, stream)
+			stream.Set("tcpSettings", gjson.New(XrayStreamTCPNone).Map())
 		}
 	case "ws":
 		j := gjson.New(XrayStreamWebSocket)
-		if sf.Path == "" { sf.Path = "/" }
 		j.Set("path", sf.Path)
 		j.Set("headers.Host", sf.Host)
-		stream = utils.SetJsonObjectByString("wsSettings", j.MustToJsonString(), stream)
+		stream.Set("wsSettings", j.Map())
 	case "grpc":
 		j := gjson.New(XrayStreamGRPC)
 		j.Set("serviceName", sf.GRPCServiceName)
-		if sf.GRPCMultiMode == "multi" {
-			j.Set("multiMode", true)
-		}
-		stream = utils.SetJsonObjectByString("grpcSettings", j.MustToJsonString(), stream)
+		j.Set("multiMode", sf.GRPCMultiMode == "multi")
+		stream.Set("grpcSettings", j.Map())
 	}
 
 	// Security Settings
 	if sf.StreamSecurity == "tls" {
 		j := gjson.New(XrayStreamTLS)
-		sn := sf.ServerName
-		if sn == "" { sn = sf.Host }
-		j.Set("serverName", sn)
+		j.Set("serverName", sf.ServerName)
 		j.Set("allowInsecure", gconv.Bool(sf.TLSAllowInsecure))
 		if sf.TLSALPN != "" {
 			j.Set("alpn", strings.Split(sf.TLSALPN, ","))
@@ -201,17 +61,15 @@ func PrepareStreamString(sf *parser.StreamField) string {
 		if sf.Fingerprint != "" {
 			j.Set("fingerprint", sf.Fingerprint)
 		}
-		stream = utils.SetJsonObjectByString("tlsSettings", j.MustToJsonString(), stream)
+		stream.Set("tlsSettings", j.Map())
 	} else if sf.StreamSecurity == "reality" {
 		j := gjson.New(XrayStreamReality)
-		sn := sf.ServerName
-		if sn == "" { sn = sf.Host }
-		j.Set("serverName", sn)
+		j.Set("serverName", sf.ServerName)
 		j.Set("publicKey", sf.RealityPublicKey)
 		j.Set("shortId", sf.RealityShortId)
 		j.Set("spiderX", sf.RealitySpiderX)
 		j.Set("fingerprint", sf.Fingerprint)
-		stream = utils.SetJsonObjectByString("realitySettings", j.MustToJsonString(), stream)
+		stream.Set("realitySettings", j.Map())
 	}
 
 	return stream.MustToJsonString()
