@@ -10,189 +10,122 @@ import (
 )
 
 /*
-https://xtls.github.io/config/transport.html#streamsettingsobject
-
-{
-  "network": "tcp",
-  "security": "none",
-  "tlsSettings": {},
-  "tcpSettings": {},
-  "kcpSettings": {},
-  "wsSettings": {},
-  "httpSettings": {},
-  "quicSettings": {},
-  "dsSettings": {},
-  "grpcSettings": {},
-  "sockopt": {
-    "mark": 0,
-    "tcpFastOpen": false,
-    "tproxy": "off",
-    "domainStrategy": "AsIs",
-    "dialerProxy": "",
-    "acceptProxyProtocol": false,
-    "tcpKeepAliveInterval": 0
-  }
-}
-
-TLSSettings:
-{
-  "serverName": "xray.com",
-  "rejectUnknownSni": false,
-  "allowInsecure": false,
-  "alpn": ["h2", "http/1.1"],
-  "minVersion": "1.2",
-  "maxVersion": "1.3",
-  "cipherSuites": "此处填写你需要的加密套件名称,每个套件名称之间用:进行分隔",
-  "certificates": [],
-  "disableSystemRoot": false,
-  "enableSessionResumption": false,
-  "fingerprint": "",
-  "pinnedPeerCertificateChainSha256": [""]
-}
-
-TCPSettings:
-https://xtls.github.io/config/transports/tcp.html#tcpobject
-{
-  "acceptProxyProtocol": false,
-  "header": {
-    "type": "none"
-  }
-}
-HttpHeaderObject:
-{
-  "type": "http",
-  "request": {},
-  "response": {}
-}
-
-WSSettings:
-{
-  "acceptProxyProtocol": false,
-  "path": "/",
-  "headers": {
-    "Host": "xray.com"
-  }
-}
-
-GRPCSettings:
-{
-  "serviceName": "name",
-  "multiMode": false,
-  "user_agent": "custom user agent",
-  "idle_timeout": 60,
-  "health_check_timeout": 20,
-  "permit_without_stream": false,
-  "initial_windows_size": 0
-}
-
-HTTPSettings:
-{
-  "host": ["xray.com"],
-  "path": "/random/path",
-  "read_idle_timeout": 10,
-  "health_check_timeout": 15,
-  "method": "PUT",
-  "headers": {
-    "Header": ["value"]
-  }
-}
-
+Xray Outbound StreamSettings Full Complete
+Supports:
+- TCP / HTTP / WS / gRPC
+- TLS / Reality
+- Fingerprint, ALPN, Path, Host, MultiMode
+- Default values preserved
 */
 
-var XrayStream string = `{
+var XrayStreamBase = `{
 	"network": "tcp",
 	"security": "none"
 }`
 
-var XrayStreamTLS string = `{
-	"serverName": "xray.com",
-	"allowInsecure": true
+var XrayStreamTLSBase = `{
+	"serverName": "",
+	"allowInsecure": false,
+	"alpn": []
 }`
 
-var XrayStreamReality string = `{
-  "shortId": "",
-  "fingerprint": "",
-  "serverName": "",
-  "publicKey": "",
-  "spiderX": ""
+var XrayStreamRealityBase = `{
+	"shortId": "",
+	"fingerprint": "",
+	"serverName": "",
+	"publicKey": "",
+	"spiderX": ""
 }`
 
-var XrayStreamTCPNone string = `{
+var XrayStreamTCPNone = `{
 	"header": {
-	  "type": "none"
+		"type": "none"
 	}
 }`
 
-var XrayStreamTCPHTTP string = `{
-  "header": {
-      "type": "http",
-      "request": {
-          "path": ["/"],
-          "headers": {
-              "Host": ["fast.com"]
-          }
-      }
-  }
+var XrayStreamTCPHTTP = `{
+	"header": {
+		"type": "http",
+		"request": {
+			"path": ["/"],
+			"headers": {
+				"Host": [""]
+			}
+		}
+	}
 }`
 
-var XrayStreamWebSocket string = `{
+var XrayStreamWebSocket = `{
 	"path": "/",
 	"headers": {
-	  "Host": "xray.com"
+		"Host": ""
 	}
 }`
 
-var XrayStreamHTTP string = `{
-	"host": [""],
-	"path": ""
+var XrayStreamGRPC = `{
+	"serviceName": "",
+	"multiMode": false,
+	"user_agent": "",
+	"idle_timeout": 60,
+	"health_check_timeout": 20,
+	"permit_without_stream": false,
+	"initial_windows_size": 0
 }`
 
-var XrayStreamGRPC string = `{
-	"serviceName": "",
-	"multiMode": false
-}`
+// ---------------- Prepare Stream ----------------
 
 func PrepareStreamString(sf *parser.StreamField) string {
-	stream := gjson.New(XrayStream)
-	
-	// Network မရှိရင် default tcp သုံးမယ်
+	stream := gjson.New(XrayStreamBase)
+
 	if sf.Network == "" {
 		sf.Network = "tcp"
 	}
 	stream.Set("network", sf.Network)
 	stream.Set("security", sf.StreamSecurity)
 
+	// ---------------- Network Transport ----------------
 	switch sf.Network {
 	case "tcp":
 		if sf.TCPHeaderType == "http" {
 			j := gjson.New(XrayStreamTCPHTTP)
-			j.Set("header.request.path.0", sf.Path)
-			j.Set("header.request.headers.Host.0", sf.Host)
-			// Xray standard က tcpSettings ဖြစ်ပါတယ်
+			if sf.Path != "" {
+				j.Set("header.request.path.0", sf.Path)
+			}
+			if sf.Host != "" {
+				j.Set("header.request.headers.Host.0", sf.Host)
+			}
 			stream = utils.SetJsonObjectByString("tcpSettings", j.MustToJsonString(), stream)
 		} else {
 			stream = utils.SetJsonObjectByString("tcpSettings", XrayStreamTCPNone, stream)
 		}
 	case "ws":
 		j := gjson.New(XrayStreamWebSocket)
-		if sf.Path == "" { sf.Path = "/" }
+		if sf.Path == "" {
+			sf.Path = "/"
+		}
 		j.Set("path", sf.Path)
-		j.Set("headers.Host", sf.Host)
+		if sf.Host != "" {
+			j.Set("headers.Host", sf.Host)
+		}
 		stream = utils.SetJsonObjectByString("wsSettings", j.MustToJsonString(), stream)
 	case "grpc":
 		j := gjson.New(XrayStreamGRPC)
-		j.Set("serviceName", sf.GRPCServiceName)
+		if sf.GRPCServiceName != "" {
+			j.Set("serviceName", sf.GRPCServiceName)
+		}
 		if sf.GRPCMultiMode == "multi" {
 			j.Set("multiMode", true)
 		}
 		stream = utils.SetJsonObjectByString("grpcSettings", j.MustToJsonString(), stream)
 	}
 
-	// Security Settings
+	// ---------------- Security ----------------
 	if sf.StreamSecurity == "tls" {
-		j := gjson.New(XrayStreamTLS)
+		j := gjson.New(XrayStreamTLSBase)
 		sn := sf.ServerName
-		if sn == "" { sn = sf.Host }
+		if sn == "" {
+			sn = sf.Host
+		}
 		j.Set("serverName", sn)
 		j.Set("allowInsecure", gconv.Bool(sf.TLSAllowInsecure))
 		if sf.TLSALPN != "" {
@@ -203,9 +136,11 @@ func PrepareStreamString(sf *parser.StreamField) string {
 		}
 		stream = utils.SetJsonObjectByString("tlsSettings", j.MustToJsonString(), stream)
 	} else if sf.StreamSecurity == "reality" {
-		j := gjson.New(XrayStreamReality)
+		j := gjson.New(XrayStreamRealityBase)
 		sn := sf.ServerName
-		if sn == "" { sn = sf.Host }
+		if sn == "" {
+			sn = sf.Host
+		}
 		j.Set("serverName", sn)
 		j.Set("publicKey", sf.RealityPublicKey)
 		j.Set("shortId", sf.RealityShortId)
@@ -216,3 +151,4 @@ func PrepareStreamString(sf *parser.StreamField) string {
 
 	return stream.MustToJsonString()
 }
+
