@@ -59,15 +59,6 @@ func (that *ProxyItem) parse() bool {
 	that.Scheme = utils.ParseScheme(that.RawUri)
 	var ob IOutbound
 	if that.Scheme == parser.SchemeSSR || (that.Scheme == parser.SchemeSS && strings.Contains(that.RawUri, "plugin=")) {
-		that.OutboundType = SingBox
-		ob = GetOutbound(SingBox, that.RawUri)
-	} else if that.Scheme == parser.SchemeSS && EnableSingBox(that.RawUri) {
-		that.OutboundType = SingBox
-		ob = GetOutbound(SingBox, that.RawUri)
-	} else if that.Scheme == parser.SchemeWireguard {
-		that.OutboundType = SingBox
-		ob = GetOutbound(SingBox, that.RawUri)
-	} else {
 		that.OutboundType = XrayCore
 		ob = GetOutbound(XrayCore, that.RawUri)
 	}
@@ -122,18 +113,6 @@ func ParseRawUriToProxyItem(rawUri string, clientType ...ClientType) (p *ProxyIt
 	}
 	p = NewItem(rawUri)
 	p.Scheme = utils.ParseScheme(p.RawUri)
-	if clientType[0] == SingBox {
-		p.OutboundType = SingBox
-		ob := GetOutbound(SingBox, p.RawUri)
-		if ob == nil {
-			return
-		}
-		ob.Parse(p.RawUri)
-		p.Outbound = ob.GetOutboundStr()
-		p.Address = ob.Addr()
-		p.Port = ob.Port()
-		return
-	} else {
 		p.OutboundType = XrayCore
 		ob := GetOutbound(XrayCore, p.RawUri)
 		if ob == nil {
@@ -144,7 +123,6 @@ func ParseRawUriToProxyItem(rawUri string, clientType ...ClientType) (p *ProxyIt
 		p.Address = ob.Addr()
 		p.Port = ob.Port()
 		return
-	}
 }
 
 func ParseEncryptedRawUriToProxyItem(rawUri string, clientType ...ClientType) (p *ProxyItem) {
@@ -157,7 +135,6 @@ func TransferProxyItem(oldProxyItem *ProxyItem, clientType ...ClientType) (newPr
 	if oldProxyItem == nil {
 		return
 	}
-	cType := SingBox // sing-box for default
 	if len(clientType) > 0 {
 		cType = clientType[0]
 	}
