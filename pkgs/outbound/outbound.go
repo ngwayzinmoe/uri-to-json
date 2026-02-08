@@ -12,7 +12,6 @@ type ClientType string
 
 const (
 	XrayCore ClientType = "xray"
-	SingBox  ClientType = "sing"
 )
 
 func GetOutbound(clientType ClientType, rawUri string) (result IOutbound) {
@@ -32,25 +31,6 @@ func GetOutbound(clientType ClientType, rawUri string) (result IOutbound) {
 			result = &xray.Hysteria2Out{RawUri: rawUri}
 		default:
 			fmt.Println("unsupported protocol for Xray: ", scheme)
-		}
-	case SingBox:
-		switch scheme {
-		case parser.SchemeVmess:
-			result = &sing.SVmessOut{RawUri: rawUri}
-		case parser.SchemeVless:
-			result = &sing.SVlessOut{RawUri: rawUri}
-		case parser.SchemeTrojan:
-			result = &sing.STrojanOut{RawUri: rawUri}
-		case parser.SchemeSS:
-			result = &sing.SShadowSocksOut{RawUri: rawUri}
-		case parser.SchemeSSR:
-			result = &sing.SShadowSocksROut{RawUri: rawUri}
-		case parser.SchemeWireguard:
-			result = &sing.SWireguardOut{RawUri: rawUri}
-		case parser.SchemeHysteria2: // [၂] Sing-box အတွက် Hysteria2 ကို Register လုပ်ခြင်း
-			result = &sing.SHysteria2Out{RawUri: rawUri}
-		default:
-			fmt.Println("unsupported protocol for Sing-box: ", scheme)
 		}
 	default:
 		fmt.Println("unsupported client type")
