@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/cmd"
-	_ "github.com/ngwayzinmoe/uri-to-json/pkgs/outbound/sing"
 	_ "github.com/ngwayzinmoe/uri-to-json/pkgs/outbound/xray"
 	_ "github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
 )
