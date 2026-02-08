@@ -2,7 +2,6 @@ package parser
 
 import (
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -10,175 +9,158 @@ import (
 )
 
 var SSMethod = map[string]struct{}{
-	"aes-128-gcm":            {},
-	"aes-256-gcm":            {},
-	"chacha20-ietf-poly1305": {},
-	"xchacha20-ietf-poly1305": {},
-	"none":                   {},
+	"2022-blake3-aes-128-gcm":       {},
+	"2022-blake3-aes-256-gcm":       {},
+	"2022-blake3-chacha20-poly1305": {},
+	"none":                          {},
+	"aes-128-gcm":                   {},
+	"aes-192-gcm":                   {},
+	"aes-256-gcm":                   {},
+	"chacha20-ietf-poly1305":        {},
+	"xchacha20-ietf-poly1305":       {},
+	"aes-128-ctr":                   {},
+	"aes-192-ctr":                   {},
+	"aes-256-ctr":                   {},
+	"aes-128-cfb":                   {},
+	"aes-192-cfb":                   {},
+	"aes-256-cfb":                   {},
+	"rc4-md5":                       {},
+	"chacha20-ietf":                 {},
+	"xchacha20":                     {},
 }
+
+/*
+shadowsocks query params:
+plugin=obfs-local;obfs=http;obfs-host=example.com
+plugin=v2ray-plugin;tls;host=example.com;path=/ws
+*/
 
 type ParserSS struct {
 	Address  string
 	Port     int
 	Method   string
 	Password string
-	Remark   string
-	Plugin string
-	OBFS string
+
+	// plugin & opts
+	Plugin     string
+	PluginOpts map[string]string
+
+	// legacy fields (compatible)
+	Host     string
+	Mode     string
+	Mux      string
+	Path     string
+	OBFS     string
 	OBFSHost string
-	Mode string
-	
-	// အရင်ကပါတဲ့ StreamField ကိုလည်း ပြန်ထည့်ထားပေးပါတယ် (XUDP/UoT အတွက်)
+
 	*StreamField
 }
 
-func (p *ParserSS) Parse(raw string) error {
-	if !strings.HasPrefix(raw, "ss://") {
-		return errors.New("not ss://")
-	}
+func (that *ParserSS) Parse(rawUri string) {
+	rawUri = that.handleSS(rawUri)
 
-	p.StreamField = &StreamField{} // Initialize StreamField
-
-	// Remark Parsing
-	if i := strings.Index(raw, "#"); i != -1 {
-		p.Remark, _ = url.QueryUnescape(raw[i+1:])
-		raw = raw[:i]
-	}
-
-	raw = strings.TrimPrefix(raw, "ss://")
-
-	// SIP002 format (method:pass@host:port)
-	if strings.Contains(raw, "@") {
-		return p.parseSIP002(raw)
-	}
-
-	// Classic format (BASE64 ONLY)
-	return p.parseClassic(raw)
-}
-
-func (p *ParserSS) parseSIP002(raw string) error {
-	parts := strings.SplitN(raw, "@", 2)
-	if len(parts) != 2 {
-		return errors.New("invalid sip002")
-	}
-
-	// [၁] UserInfo (Method:Pass) ကို Unescape လုပ်ပြီးမှ Decode လုပ်မယ်
-	userInfoRaw := parts[0]
-	if decodedInfo, err := url.QueryUnescape(userInfoRaw); err == nil {
-		userInfoRaw = decodedInfo
-	}
-
-	userBytes, err := decodeSSBase64(userInfoRaw)
+	u, err := url.Parse(rawUri)
 	if err != nil {
-		return err
+		return
 	}
 
-	user := string(userBytes)
-	mp := strings.SplitN(user, ":", 2)
-	if len(mp) != 2 {
-		return errors.New("invalid method:password")
+	that.StreamField = &StreamField{}
+	that.Address = u.Hostname()
+	that.Port, _ = strconv.Atoi(u.Port())
+
+	// ---------- user info (method:password) ----------
+	user := u.User.Username()
+
+	// try BASE64 format first
+	if m, p, err := decodeSSUser(user); err == nil {
+		that.Method = m
+		that.Password = p
+	} else {
+		// fallback old format ss://method:pass@
+		that.Method = user
+		that.Password, _ = u.User.Password()
 	}
 
-	p.Method = normalizeMethod(mp[0])
-	
-	// [၂] Password ထဲက Special Character တွေကို Unescape လုပ်ပေးမယ်
-	pass, _ := url.QueryUnescape(mp[1])
-	p.Password = pass
-
-	// Host:Port & Query params
-	hostPart := parts[1]
-	// URL parse သုံးပြီး Query ပါရင် handle လုပ်မယ်
-	u, err := url.Parse("http://" + hostPart)
-	if err != nil {
-		return err
+	if that.Method == "rc4" {
+		that.Method = "rc4-md5"
+	}
+	if _, ok := SSMethod[that.Method]; !ok {
+		that.Method = "none"
 	}
 
-	p.Address = u.Hostname()
-	p.Port, _ = strconv.Atoi(u.Port())
-
-	//Query Plugin data into model
+	// ---------- query ----------
 	query := u.Query()
-	p.Plugin = query.Get("plugin")
-	p.OBFS = query.Get("obfs")
-	p.OBFSHost = query.Get("obfs-host")
-	p.Mode = query.Get("mode")
 
-	// UoT Logic (Query ထဲမှာ uot=1 ပါရင် ဖွင့်ပေးမယ်)
-	if query.Get("uot") == "1" {
-		p.StreamField.UoT = true
-	}
+	// plugin support
+	that.Plugin, that.PluginOpts = parsePlugin(query.Get("plugin"))
 
-	return p.validate()
+	// legacy fields mapping
+	that.Host = query.Get("host")
+	that.Mode = query.Get("mode")
+	that.Mux = query.Get("mux")
+	that.Path = query.Get("path")
+	that.OBFS = query.Get("obfs")
+	that.OBFSHost = query.Get("obfs-host")
 }
 
-func (p *ParserSS) parseClassic(raw string) error {
-	decoded, err := decodeSSBase64(raw)
+func decodeSSUser(user string) (method, password string, err error) {
+	// padding fix
+	if m := len(user) % 4; m != 0 {
+		user += strings.Repeat("=", 4-m)
+	}
+
+	data, err := base64.StdEncoding.DecodeString(user)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
-	s := string(decoded)
-	mpHost := strings.SplitN(s, "@", 2)
-	if len(mpHost) != 2 {
-		return errors.New("invalid classic ss")
+	parts := strings.SplitN(string(data), ":", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid ss base64 user")
 	}
-
-	mp := strings.SplitN(mpHost[0], ":", 2)
-	if len(mp) != 2 {
-		return errors.New("invalid method:password")
-	}
-
-	p.Method = normalizeMethod(mp[0])
-	
-	// Password Unescape
-	pass, _ := url.QueryUnescape(mp[1])
-	p.Password = pass
-
-	host, portStr, ok := strings.Cut(mpHost[1], ":")
-	if !ok {
-		return errors.New("invalid host:port")
-	}
-
-	p.Address = host
-	p.Port, _ = strconv.Atoi(portStr)
-
-	return p.validate()
+	return parts[0], parts[1], nil
 }
 
-func (p *ParserSS) validate() error {
-	if p.Address == "" || p.Port <= 0 {
-		return errors.New("invalid address or port")
-	}
-	return nil
-}
-
-func normalizeMethod(m string) string {
-	m = strings.ToLower(m)
-	if m == "rc4" { return "rc4-md5" }
-	return m
-}
-
-func decodeSSBase64(s string) ([]byte, error) {
-	// Base64 padding and URL safety
-	s = strings.ReplaceAll(s, "-", "+")
-	s = strings.ReplaceAll(s, "_", "/")
-
-	switch len(s) % 4 {
-	case 2: s += "=="
-	case 3: s += "="
+func parsePlugin(raw string) (name string, opts map[string]string) {
+	opts = map[string]string{}
+	if raw == "" {
+		return "", opts
 	}
 
-	// [၃] base64 decode logic ပိုခိုင်မာအောင် လုပ်ခြင်း
-	b, err := base64.StdEncoding.DecodeString(s)
-	if err != nil {
-		b, err = base64.RawStdEncoding.DecodeString(s)
+	parts := strings.Split(raw, ";")
+	name = parts[0]
+
+	for _, p := range parts[1:] {
+		if strings.Contains(p, "=") {
+			kv := strings.SplitN(p, "=", 2)
+			opts[kv[0]] = kv[1]
+		} else {
+			opts[p] = "true" // e.g. tls
+		}
 	}
-	return b, err
+	return
 }
 
-func (p *ParserSS) Show() {
-	if p == nil { return }
-	fmt.Printf("SS => addr: %s, port: %d, method: %s, pass: %s, uot: %v\n", 
-		p.Address, p.Port, p.Method, p.Password, p.StreamField.UoT)
+func (that *ParserSS) handleSS(rawUri string) string {
+	return strings.ReplaceAll(rawUri, "#ss#\u00261@", "@")
 }
 
+func (that *ParserSS) GetAddr() string {
+	return that.Address
+}
+
+func (that *ParserSS) GetPort() int {
+	return that.Port
+}
+
+func (that *ParserSS) Show() {
+	fmt.Printf(
+		"addr=%s port=%d method=%s password=%s plugin=%s opts=%v\n",
+		that.Address,
+		that.Port,
+		that.Method,
+		that.Password,
+		that.Plugin,
+		that.PluginOpts,
+	)
+}
