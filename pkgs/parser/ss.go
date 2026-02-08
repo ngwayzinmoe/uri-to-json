@@ -2,10 +2,38 @@ package parser
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 )
+
+var SSMethod map[string]struct{} = map[string]struct{}{
+	"2022-blake3-aes-128-gcm":       {},
+	"2022-blake3-aes-256-gcm":       {},
+	"2022-blake3-chacha20-poly1305": {},
+	"none":                          {},
+	"aes-128-gcm":                   {},
+	"aes-192-gcm":                   {},
+	"aes-256-gcm":                   {},
+	"chacha20-ietf-poly1305":        {},
+	"xchacha20-ietf-poly1305":       {},
+	"aes-128-ctr":                   {},
+	"aes-192-ctr":                   {},
+	"aes-256-ctr":                   {},
+	"aes-128-cfb":                   {},
+	"aes-192-cfb":                   {},
+	"aes-256-cfb":                   {},
+	"rc4-md5":                       {},
+	"chacha20-ietf":                 {},
+	"xchacha20":                     {},
+}
+
+/*
+shadowsocks: ['plugin', 'obfs', 'obfs-host', 'mode', 'path', 'mux', 'host']
+*/
+
+
 
 type ParserSS struct {
 	Address  string
@@ -13,97 +41,91 @@ type ParserSS struct {
 	Method   string
 	Password string
 
-	Plugin     string
-	PluginOpts map[string]string
+	Host     string
+	Mode     string
+	Mux      string
+	Path     string
+	Plugin   string
+	OBFS     string
+	OBFSHost string
 
 	*StreamField
 }
 
-func (p *ParserSS) Parse(raw string) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return
-	}
+// Parse a ss:// URI (Base64 encoded) into ParserSS struct
+func (that *ParserSS) Parse(rawUri string) {
+	rawUri = that.handleSS(rawUri)
+	rawUri = that.decodeBase64IfNeeded(rawUri)
 
-	p.StreamField = &StreamField{}
-	p.Address = u.Hostname()
-	p.Port, _ = strconv.Atoi(u.Port())
-
-	user := u.User.Username()
-
-	// base64 userinfo
-	if b, err := base64.StdEncoding.DecodeString(padBase64(user)); err == nil {
-		parts := strings.SplitN(string(b), ":", 2)
-		if len(parts) == 2 {
-			p.Method = parts[0]
-			p.Password = parts[1]
+	if u, err := url.Parse(rawUri); err == nil {
+		that.StreamField = &StreamField{}
+		that.Address = u.Hostname()
+		that.Port, _ = strconv.Atoi(u.Port())
+		that.Method = u.User.Username()
+		if that.Method == "rc4" {
+			that.Method = "rc4-md5"
 		}
-	} else {
-		p.Method = user
-		p.Password, _ = u.User.Password()
+		if _, ok := SSMethod[that.Method]; !ok {
+			that.Method = "none"
+		}
+		that.Password, _ = u.User.Password()
+
+		query := u.Query()
+		that.Host = query.Get("host")
+		that.Mode = query.Get("mode")
+		that.Mux = query.Get("mux")
+		that.Path = query.Get("path")
+		that.Plugin = query.Get("plugin")
+		that.OBFS = query.Get("obfs")
+		that.OBFSHost = query.Get("obfs-host")
 	}
-
-	// plugin
-	p.Plugin, p.PluginOpts = parsePlugin(u.Query().Get("plugin"))
-
-	p.BuildStream()
 }
 
-func (p *ParserSS) BuildStream() {
-	if p.StreamField == nil {
-		p.StreamField = &StreamField{}
-	}
-
-	switch p.Plugin {
-
-	case "v2ray-plugin":
-		p.Network = "ws"
-
-		if p.PluginOpts["tls"] == "true" {
-			p.StreamSecurity = "tls"
+// decodeBase64IfNeeded checks if ss:// has base64 part and decodes it
+func (that *ParserSS) decodeBase64IfNeeded(rawUri string) string {
+	const prefix = "ss://"
+	if strings.HasPrefix(rawUri, prefix) {
+		data := rawUri[len(prefix):]
+		// strip #fragment if exists
+		fragIdx := strings.Index(data, "#")
+		fragment := ""
+		if fragIdx != -1 {
+			fragment = data[fragIdx:]
+			data = data[:fragIdx]
 		}
-
-		p.Host = p.PluginOpts["host"]
-		p.ServerName = p.Host
-		p.Path = p.PluginOpts["path"]
-
-	case "obfs-local", "simple-obfs":
-		p.Network = "tcp"
-		p.TCPHeaderType = "http"
-		p.Host = p.PluginOpts["obfs-host"]
-	}
-
-	// defaults
-	if p.Network == "" {
-		p.Network = "tcp"
-	}
-
-	p.UoT = true
-}
-
-func parsePlugin(raw string) (string, map[string]string) {
-	opts := map[string]string{}
-	if raw == "" {
-		return "", opts
-	}
-
-	parts := strings.Split(raw, ";")
-	name := parts[0]
-
-	for _, p := range parts[1:] {
-		if strings.Contains(p, "=") {
-			kv := strings.SplitN(p, "=", 2)
-			opts[kv[0]] = kv[1]
-		} else {
-			opts[p] = "true"
+		// strip query if exists
+		queryIdx := strings.Index(data, "?")
+		query := ""
+		if queryIdx != -1 {
+			query = data[queryIdx:]
+			data = data[:queryIdx]
+		}
+		// decode base64
+		if decoded, err := base64.StdEncoding.DecodeString(data); err == nil {
+			return prefix + string(decoded) + query + fragment
+		} else if decodedURL, err := base64.RawURLEncoding.DecodeString(data); err == nil {
+			return prefix + string(decodedURL) + query + fragment
 		}
 	}
-	return name, opts
+	return rawUri
 }
 
-func padBase64(s string) string {
-	if m := len(s) % 4; m != 0 {
-		s += strings.Repeat("=", 4-m)
-	}
-	return s
+func (that *ParserSS) handleSS(rawUri string) string {
+	return strings.ReplaceAll(rawUri, "#ss#\u00261@", "@")
+}
+
+func (that *ParserSS) GetAddr() string {
+	return that.Address
+}
+
+func (that *ParserSS) GetPort() int {
+	return that.Port
+}
+
+func (that *ParserSS) Show() {
+	fmt.Printf("addr: %s, port: %d, method: %s, password: %s\n",
+		that.Address,
+		that.Port,
+		that.Method,
+		that.Password)
 }
