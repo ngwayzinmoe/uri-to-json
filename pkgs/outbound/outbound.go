@@ -3,7 +3,6 @@ package outbound
 import (
 	"fmt"
 
-	"github.com/ngwayzinmoe/uri-to-json/pkgs/outbound/sing"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/outbound/xray"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/utils"
