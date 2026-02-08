@@ -2,44 +2,17 @@ package xray
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/gogf/gf/v2/encoding/gjson"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
 	"github.com/ngwayzinmoe/uri-to-json/pkgs/utils"
-	"github.com/gogf/gf/v2/encoding/gjson"
 )
 
 /*
-https://xtls.github.io/config/outbounds/shadowsocks.html#serverobject
+Xray Shadowsocks outbound (official style)
 
-{
-	"servers": [
-	  {
-		"email": "love@xray.com",
-		"address": "127.0.0.1",
-		"port": 1234,
-		"method": "加密方式",
-		"password": "密码",
-		"uot": true,
-		"UoTVersion": 2,
-		"level": 0
-	  }
-	]
-}
-
-Method:
-2022-blake3-aes-128-gcm
-2022-blake3-aes-256-gcm
-2022-blake3-chacha20-poly1305
-aes-256-gcm
-aes-128-gcm
-chacha20-poly1305 或称 chacha20-ietf-poly1305
-xchacha20-poly1305 或称 xchacha20-ietf-poly1305
-none 或 plain
-
-UoTVersion:
-UDP over TCP 的实现版本。
-当前可选值：1, 2
-
+https://xtls.github.io/config/outbounds/shadowsocks.html
 */
 
 var XraySS = `{
@@ -55,6 +28,13 @@ var XraySS = `{
 	]
 }`
 
+// Xray outbound template (project original style)
+var XrayOut = `{
+	"protocol": "",
+	"settings": %s,
+	"streamSettings": %s,
+	"tag": ""
+}`
 
 type ShadowSocksOut struct {
 	RawUri   string
@@ -62,11 +42,18 @@ type ShadowSocksOut struct {
 	outbound string
 }
 
+/* ---------------- Parse ---------------- */
+
 func (s *ShadowSocksOut) Parse(rawUri string) {
 	s.RawUri = rawUri
 	s.Parser = &parser.ParserSS{}
-	_ = s.Parser.Parse(rawUri) // silent-fail handled later
+	_ = s.Parser.Parse(rawUri)
+
+	// IMPORTANT: build stream from plugin
+	s.Parser.BuildStream()
 }
+
+/* ---------------- Basic getters ---------------- */
 
 func (s *ShadowSocksOut) Addr() string {
 	if s.Parser == nil {
@@ -90,6 +77,8 @@ func (s *ShadowSocksOut) GetRawUri() string {
 	return s.RawUri
 }
 
+/* ---------------- Settings ---------------- */
+
 func (s *ShadowSocksOut) getSettings() string {
 	if s.Parser == nil {
 		return ""
@@ -102,13 +91,73 @@ func (s *ShadowSocksOut) getSettings() string {
 	j.Set("servers.0.method", s.Parser.Method)
 	j.Set("servers.0.password", s.Parser.Password)
 
-	// UDP over TCP (Xray recommended)
+	// UDP over TCP (recommended by Xray)
 	j.Set("servers.0.uot", true)
 	j.Set("servers.0.UoTVersion", 2)
 
 	return j.MustToJsonString()
 }
 
+/* ---------------- StreamSettings ---------------- */
+
+func buildStreamSettings(sf *parser.StreamField) string {
+	if sf == nil || sf.Network == "" {
+		return ""
+	}
+
+	j := gjson.New("{}")
+
+	j.Set("network", sf.Network)
+
+	if sf.StreamSecurity != "" {
+		j.Set("security", sf.StreamSecurity)
+	}
+
+	switch sf.Network {
+
+	case "tcp":
+		if sf.TCPHeaderType != "" {
+			j.Set("tcpSettings.header.type", sf.TCPHeaderType)
+
+			if sf.Host != "" {
+				j.Set(
+					"tcpSettings.header.request.headers.Host",
+					[]string{sf.Host},
+				)
+			}
+		}
+
+	case "ws":
+		if sf.Path != "" {
+			j.Set("wsSettings.path", sf.Path)
+		}
+		if sf.Host != "" {
+			j.Set("wsSettings.headers.Host", sf.Host)
+		}
+
+	case "grpc":
+		j.Set("grpcSettings.serviceName", sf.GRPCServiceName)
+		j.Set("grpcSettings.multiMode", sf.GRPCMultiMode == "true")
+	}
+
+	if sf.StreamSecurity == "tls" {
+		j.Set("tlsSettings.serverName", sf.ServerName)
+		j.Set("tlsSettings.allowInsecure", sf.TLSAllowInsecure == "true")
+
+		if sf.TLSALPN != "" {
+			j.Set("tlsSettings.alpn",
+				strings.Split(sf.TLSALPN, ","))
+		}
+
+		if sf.Fingerprint != "" {
+			j.Set("tlsSettings.fingerprint", sf.Fingerprint)
+		}
+	}
+
+	return j.MustToJsonString()
+}
+
+/* ---------------- Outbound builder ---------------- */
 
 func (s *ShadowSocksOut) setProtocolAndTag(outStr string) string {
 	j := gjson.New(outStr)
@@ -133,15 +182,22 @@ func (s *ShadowSocksOut) GetOutboundStr() string {
 
 	settings := s.getSettings()
 
-	// Shadowsocks does NOT use stream settings
-	outStr := fmt.Sprintf(XrayOut, settings, "")
+	stream := ""
+	if s.Parser.StreamField != nil &&
+		s.Parser.StreamField.Network != "" {
+		stream = buildStreamSettings(s.Parser.StreamField)
+	}
+
+	outStr := fmt.Sprintf(XrayOut, settings, stream)
 
 	s.outbound = s.setProtocolAndTag(outStr)
 	return s.outbound
 }
 
+/* ---------------- Test ---------------- */
+
 func TestSS() {
-	rawUri := "ss://aes-256-gcm:bad5fba5-a7bc-4709-882b-e15edad16cef@ah-cmi-1000m.ikun666.club:18878#CN-SG"
+	rawUri := "ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTp0ZXN0cGFzcw==@1.2.3.4:443?plugin=v2ray-plugin;tls;host=cdn.example.com;path=/ws#SS"
 
 	sso := &ShadowSocksOut{}
 	sso.Parse(rawUri)
