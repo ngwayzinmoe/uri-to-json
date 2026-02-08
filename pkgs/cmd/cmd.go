@@ -41,23 +41,6 @@ func ShowOutboundStr(oStr string) {
 func init() {
 	app = New()
 	app.Add(&cli.Command{
-		Name:    "sing",
-		Aliases: []string{"s"},
-		Usage:   "Generate sing-box outbound from vpn url.",
-		Action: func(ctx *cli.Context) error {
-			rawUri := ctx.Args().First()
-			if rawUri == "" {
-				return nil
-			}
-			ob := outbound.GetOutbound(outbound.SingBox, rawUri)
-			ob.Parse(rawUri)
-			fmt.Println(rawUri)
-			ShowOutboundStr(ob.GetOutboundStr())
-			return nil
-		},
-	})
-
-	app.Add(&cli.Command{
 		Name:    "xray",
 		Aliases: []string{"x"},
 		Usage:   "Generate xray-core outbound from vpn url.",
