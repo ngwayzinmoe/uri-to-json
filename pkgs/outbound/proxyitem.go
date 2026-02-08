@@ -135,13 +135,7 @@ func TransferProxyItem(oldProxyItem *ProxyItem, clientType ...ClientType) (newPr
 	if oldProxyItem == nil {
 		return
 	}
-	if len(clientType) > 0 {
-		cType = clientType[0]
-	}
-	if oldProxyItem.OutboundType == cType {
-		return oldProxyItem
-	}
-	newProxyItem = ParseRawUriToProxyItem(oldProxyItem.RawUri, cType)
+	newProxyItem = ParseRawUriToProxyItem(oldProxyItem.RawUri)
 	newProxyItem.Location = oldProxyItem.Location
 	newProxyItem.RTT = oldProxyItem.RTT
 	return
