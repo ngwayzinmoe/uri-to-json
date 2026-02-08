@@ -12,73 +12,14 @@ import (
 )
 
 /*
-Transport:
-http://sing-box.sagernet.org/zh/configuration/shared/v2ray-transport/
+Xray Stream → Sing-box Transport Mapping
 
-HTTP:
-{
-  "type": "http",
-  "host": [],
-  "path": "",
-  "method": "",
-  "headers": {},
-  "idle_timeout": "15s",
-  "ping_timeout": "15s"
-}
-
-WebSocket:
-{
-  "type": "ws",
-  "path": "",
-  "headers": {},
-  "max_early_data": 0,
-  "early_data_header_name": ""
-}
-
-GRPC:
-{
-  "type": "grpc",
-  "service_name": "TunService",
-  "idle_timeout": "15s",
-  "ping_timeout": "15s",
-  "permit_without_stream": false
-}
-
-QUIC:
-{
-  "type": "quic"
-}
-
-TLS:
-http://sing-box.sagernet.org/zh/configuration/shared/tls/
-
-{
-  "enabled": true,
-  "disable_sni": false,
-  "server_name": "",
-  "insecure": false,
-  "alpn": [],
-  "min_version": "",
-  "max_version": "",
-  "cipher_suites": [],
-  "certificate": "",
-  "certificate_path": "",
-  "ech": {
-    "enabled": false,
-    "pq_signature_schemes_enabled": false,
-    "dynamic_record_sizing_disabled": false,
-    "config": ""
-  },
-  "utls": {
-    "enabled": false,
-    "fingerprint": ""
-  },
-  "reality": {
-    "enabled": false,
-    "public_key": "jNXHt1yRo0vDuchQlIP6Z0ZvjT3KtzVI-T4E7RoLJS0",
-    "short_id": "0123456789abcdef"
-  }
-}
+Supports:
+- TCP / HTTP
+- WebSocket
+- gRPC
+- QUIC (optional)
+- TLS / uTLS / Reality
 */
 
 var SingHTTPandTCP string = `{
@@ -109,8 +50,8 @@ var SingTLS string = `{
 	"enabled": true,
 	"disable_sni": false,
 	"server_name": "",
-	"insecure": false,
-  }`
+	"insecure": false
+}`
 
 var SinguTLS string = `{
 	"enabled": false,
@@ -123,11 +64,9 @@ var SingReality string = `{
 	"short_id": ""
 }`
 
-func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Json) {
-	var tp string
-	// အကယ်၍ network က plain tcp ဖြစ်နေရင် sing-box မှာ transport မလိုပါ
+func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) *gjson.Json {
 	if sf.Network == "" {
-		sf.Network = "tcp"
+		sf.Network = "tcp" // default
 	}
 
 	switch sf.Network {
@@ -146,7 +85,8 @@ func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Js
 		if sf.Path != "" {
 			SetPathForSingBoxTransport(sf.Path, j)
 		}
-		tp = j.MustToJsonString()
+		cnf = utils.SetJsonObjectByString("transport", j.MustToJsonString(), cnf)
+
 	case "ws":
 		j := gjson.New(SingWebSocket)
 		host := sf.Host
@@ -154,29 +94,26 @@ func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Js
 			host = sf.ServerName
 		}
 		if host != "" {
-			// WebSocket header ပြင်ဆင်မှု
 			j.Set("headers.Host", host)
 		}
 		if sf.Path == "" {
 			sf.Path = "/"
 		}
 		SetPathForSingBoxTransport(sf.Path, j)
-		tp = j.MustToJsonString()
+		cnf = utils.SetJsonObjectByString("transport", j.MustToJsonString(), cnf)
+
 	case "grpc":
 		j := gjson.New(SingGRPC)
-		j.Set("service_name", sf.GRPCServiceName)
-		tp = j.MustToJsonString()
-	default:
-		tp = "" // default protocol များအတွက်
+		if sf.GRPCServiceName != "" {
+			j.Set("service_name", sf.GRPCServiceName)
+		}
+		cnf = utils.SetJsonObjectByString("transport", j.MustToJsonString(), cnf)
+
+	case "quic":
+		cnf = utils.SetJsonObjectByString("transport", `{"type":"quic"}`, cnf)
 	}
 
-	if tp != "" && tp != "{}" {
-		cnf = utils.SetJsonObjectByString("transport", tp, cnf)
-	}
-
-	// TLS / Reality Settings
-	var tlsStr string
-	// Shadowsocks Plugin တွေမှာ "tls" လို့ပါရင် security ကို tls လို့ သတ်မှတ်ပေးရမယ်
+	// ===== TLS / uTLS / Reality =====
 	if sf.StreamSecurity == "tls" || sf.StreamSecurity == "reality" {
 		j := gjson.New(SingTLS)
 		if sf.ServerName == "" {
@@ -184,12 +121,7 @@ func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Js
 		}
 		j.Set("enabled", true)
 		j.Set("server_name", sf.ServerName)
-		
-		allowInsecure := false
-		if sf.TLSAllowInsecure != "" {
-			allowInsecure = gconv.Bool(sf.TLSAllowInsecure)
-		}
-		j.Set("insecure", allowInsecure)
+		j.Set("insecure", gconv.Bool(sf.TLSAllowInsecure))
 
 		if sf.Fingerprint != "" {
 			utls := gjson.New(SinguTLS)
@@ -205,14 +137,11 @@ func PrepareStreamStr(cnf *gjson.Json, sf *parser.StreamField) (result *gjson.Js
 			reality.Set("public_key", sf.RealityPublicKey)
 			j = utils.SetJsonObjectByString("reality", reality.MustToJsonString(), j)
 		}
-		tlsStr = j.MustToJsonString()
+
+		cnf = utils.SetJsonObjectByString("tls", j.MustToJsonString(), cnf)
 	}
 
-	if tlsStr != "" {
-		cnf = utils.SetJsonObjectByString("tls", tlsStr, cnf)
-	}
-	result = cnf
-	return
+	return cnf
 }
 
 func SetPathForSingBoxTransport(pathStr string, j *gjson.Json) {
@@ -227,13 +156,13 @@ func SetPathForSingBoxTransport(pathStr string, j *gjson.Json) {
 	}
 }
 
-func ParseSingBoxPathToURL(pathStr string) (result *url.URL) {
+func ParseSingBoxPathToURL(pathStr string) *url.URL {
 	if pathStr == "" {
-		return
+		return nil
 	}
 	if strings.HasPrefix(pathStr, "/") {
 		pathStr = "http://www.test.com" + pathStr
 	}
-	result, _ = url.Parse(pathStr)
-	return
+	u, _ := url.Parse(pathStr)
+	return u
 }
