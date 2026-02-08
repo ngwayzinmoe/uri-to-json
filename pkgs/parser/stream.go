@@ -4,6 +4,7 @@ type StreamField struct {
 	Network          string
 	StreamSecurity   string
 	Path             string
+	Mux string
 	Host             string
 	TCPHeaderType    string
 	GRPCServiceName  string
@@ -18,5 +19,6 @@ type StreamField struct {
 	PacketEncoding   string
 	UoT bool
 }
+
 
 
