@@ -1,166 +1,102 @@
-package parser
+package sing
 
 import (
-	"encoding/base64"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
+
+	"github.com/ngwayzinmoe/uri-to-json/pkgs/parser"
+	"github.com/ngwayzinmoe/uri-to-json/pkgs/utils"
+	"github.com/gogf/gf/v2/encoding/gjson"
 )
 
-var SSMethod = map[string]struct{}{
-	"2022-blake3-aes-128-gcm":       {},
-	"2022-blake3-aes-256-gcm":       {},
-	"2022-blake3-chacha20-poly1305": {},
-	"none":                          {},
-	"aes-128-gcm":                   {},
-	"aes-192-gcm":                   {},
-	"aes-256-gcm":                   {},
-	"chacha20-ietf-poly1305":        {},
-	"xchacha20-ietf-poly1305":       {},
-	"aes-128-ctr":                   {},
-	"aes-192-ctr":                   {},
-	"aes-256-ctr":                   {},
-	"aes-128-cfb":                   {},
-	"aes-192-cfb":                   {},
-	"aes-256-cfb":                   {},
-	"rc4-md5":                       {},
-	"chacha20-ietf":                 {},
-	"xchacha20":                     {},
+var SingSS = `{
+  "type": "shadowsocks",
+  "tag": "ss-out",
+  "server": "",
+  "server_port": 0,
+  "method": "",
+  "password": ""
+}`
+
+type SShadowSocksOut struct {
+	RawUri   string
+	Parser   *parser.ParserSS
+	outbound string
 }
 
-/*
-shadowsocks query params:
-plugin=obfs-local;obfs=http;obfs-host=example.com
-plugin=v2ray-plugin;tls;host=example.com;path=/ws
-*/
-
-type ParserSS struct {
-	Address  string
-	Port     int
-	Method   string
-	Password string
-
-	// plugin & opts
-	Plugin     string
-	PluginOpts map[string]string
-
-	// legacy fields (compatible)
-	Host     string
-	Mode     string
-	Mux      string
-	Path     string
-	OBFS     string
-	OBFSHost string
-
-	*StreamField
+func (s *SShadowSocksOut) Parse(rawUri string) {
+	s.RawUri = rawUri
+	s.Parser = &parser.ParserSS{}
+	_ = s.Parser.Parse(rawUri)
 }
 
-func (that *ParserSS) Parse(rawUri string) {
-	rawUri = that.handleSS(rawUri)
-
-	u, err := url.Parse(rawUri)
-	if err != nil {
-		return
+func (s *SShadowSocksOut) getSettings() string {
+	p := s.Parser
+	if p == nil || p.Address == "" || p.Port == 0 {
+		return ""
 	}
 
-	that.StreamField = &StreamField{}
-	that.Address = u.Hostname()
-	that.Port, _ = strconv.Atoi(u.Port())
+	j := gjson.New(SingSS)
 
-	// ---------- user info (method:password) ----------
-	user := u.User.Username()
+	// ===== Required =====
+	j.Set("type", "shadowsocks")
+	j.Set("tag", utils.OutboundTag)
+	j.Set("server", p.Address)
+	j.Set("server_port", p.Port)
+	j.Set("method", p.Method)
+	j.Set("password", p.Password)
 
-	// try BASE64 format first
-	if m, p, err := decodeSSUser(user); err == nil {
-		that.Method = m
-		that.Password = p
-	} else {
-		// fallback old format ss://method:pass@
-		that.Method = user
-		that.Password, _ = u.User.Password()
+	// ===== Plugin =====
+	if p.Plugin != "" {
+		j.Set("plugin", p.Plugin)
 	}
 
-	if that.Method == "rc4" {
-		that.Method = "rc4-md5"
+	// ===== Plugin opts =====
+	opts := []string{}
+
+	// obfs-local
+	if p.OBFS != "" {
+		opts = append(opts, fmt.Sprintf("obfs=%s", p.OBFS))
 	}
-	if _, ok := SSMethod[that.Method]; !ok {
-		that.Method = "none"
+	if p.OBFSHost != "" {
+		opts = append(opts, fmt.Sprintf("obfs-host=%s", p.OBFSHost))
 	}
 
-	// ---------- query ----------
-	query := u.Query()
+	// v2ray-plugin mode
+	if p.Mode != "" {
+		opts = append(opts, fmt.Sprintf("mode=%s", p.Mode))
+	}
 
-	// plugin support
-	that.Plugin, that.PluginOpts = parsePlugin(query.Get("plugin"))
+	if len(opts) > 0 {
+		j.Set("plugin_opts", strings.Join(opts, ";"))
+	}
 
-	// legacy fields mapping
-	that.Host = query.Get("host")
-	that.Mode = query.Get("mode")
-	that.Mux = query.Get("mux")
-	that.Path = query.Get("path")
-	that.OBFS = query.Get("obfs")
-	that.OBFSHost = query.Get("obfs-host")
+	// ===== Network =====
+	if p.Network != "" {
+		j.Set("network", p.Network) // tcp / udp
+	}
+
+	// ===== UDP over TCP =====
+	if p.UoT {
+		j.Set("udp_over_tcp", gjson.New(`{}`).Map())
+	}
+
+	// ===== Multiplex (optional default empty) =====
+	if p.Mux {
+		j.Set("multiplex", gjson.New(`{}`).Map())
+	}
+
+	return j.MustToJsonString()
 }
 
-func decodeSSUser(user string) (method, password string, err error) {
-	// padding fix
-	if m := len(user) % 4; m != 0 {
-		user += strings.Repeat("=", 4-m)
+func (s *SShadowSocksOut) GetOutboundStr() string {
+	if s.outbound != "" {
+		return s.outbound
 	}
-
-	data, err := base64.StdEncoding.DecodeString(user)
-	if err != nil {
-		return "", "", err
+	settings := s.getSettings()
+	if settings == "" {
+		return ""
 	}
-
-	parts := strings.SplitN(string(data), ":", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid ss base64 user")
-	}
-	return parts[0], parts[1], nil
-}
-
-func parsePlugin(raw string) (name string, opts map[string]string) {
-	opts = map[string]string{}
-	if raw == "" {
-		return "", opts
-	}
-
-	parts := strings.Split(raw, ";")
-	name = parts[0]
-
-	for _, p := range parts[1:] {
-		if strings.Contains(p, "=") {
-			kv := strings.SplitN(p, "=", 2)
-			opts[kv[0]] = kv[1]
-		} else {
-			opts[p] = "true" // e.g. tls
-		}
-	}
-	return
-}
-
-func (that *ParserSS) handleSS(rawUri string) string {
-	return strings.ReplaceAll(rawUri, "#ss#\u00261@", "@")
-}
-
-func (that *ParserSS) GetAddr() string {
-	return that.Address
-}
-
-func (that *ParserSS) GetPort() int {
-	return that.Port
-}
-
-func (that *ParserSS) Show() {
-	fmt.Printf(
-		"addr=%s port=%d method=%s password=%s plugin=%s opts=%v\n",
-		that.Address,
-		that.Port,
-		that.Method,
-		that.Password,
-		that.Plugin,
-		that.PluginOpts,
-	)
+	s.outbound = settings
+	return s.outbound
 }
