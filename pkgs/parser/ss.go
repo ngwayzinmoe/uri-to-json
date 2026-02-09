@@ -8,13 +8,25 @@ import (
 	"strings"
 )
 
-type StreamField struct{}
-
 var SSMethod map[string]struct{} = map[string]struct{}{
-	"chacha20-ietf-poly1305":        {},
-	"aes-256-gcm":                   {},
+	"2022-blake3-aes-128-gcm":       {},
+	"2022-blake3-aes-256-gcm":       {},
+	"2022-blake3-chacha20-poly1305": {},
+	"none":                          {},
 	"aes-128-gcm":                   {},
-	// ... (ကျန်တဲ့ method တွေ ဒီမှာ ထည့်ထားပါ)
+	"aes-192-gcm":                   {},
+	"aes-256-gcm":                   {},
+	"chacha20-ietf-poly1305":        {},
+	"xchacha20-ietf-poly1305":       {},
+	"aes-128-ctr":                   {},
+	"aes-192-ctr":                   {},
+	"aes-256-ctr":                   {},
+	"aes-128-cfb":                   {},
+	"aes-192-cfb":                   {},
+	"aes-256-cfb":                   {},
+	"rc4-md5":                       {},
+	"chacha20-ietf":                 {},
+	"xchacha20":                     {},
 }
 
 type ParserSS struct {
@@ -22,88 +34,120 @@ type ParserSS struct {
 	Port     int
 	Method   string
 	Password string
+
+	Host     string
+	Mode     string
+	Mux      string
+	Path     string
+	Plugin   string
+	OBFS     string
+	OBFSHost string
+
 	*StreamField
 }
 
+// Added to prevent error
+
 func (that *ParserSS) Parse(rawUri string) {
-	that.StreamField = &StreamField{}
+	rawUri = that.handleSS(rawUri)
 	
-	// 1. Fragment (#) ကို အရင်ဖယ်ထုတ်မယ်
-	mainPart := rawUri
-	if idx := strings.Index(rawUri, "#"); idx != -1 {
-		mainPart = rawUri[:idx]
-	}
-
-	// 2. ss:// prefix ကို ဖယ်မယ်
-	if strings.HasPrefix(mainPart, "ss://") {
-		mainPart = mainPart[5:]
-	}
-
-	// 3. @ ကို ရှာပြီး userinfo နဲ့ host:port ကို ခွဲမယ်
-	atIdx := strings.LastIndex(mainPart, "@")
-	if atIdx == -1 {
-		// @ မပါရင် တစ်ခုလုံးက base64 ဖြစ်နိုင်တယ်
-		that.handleBase64Format(mainPart)
+	u, err := url.Parse(rawUri)
+	if err != nil {
 		return
 	}
 
-	// User Info အပိုင်း (method:password)
-	userInfoEnc := mainPart[:atIdx]
-	// Host နှင့် Port အပိုင်း
-	addrPort := mainPart[atIdx+1:]
+	that.StreamField = &StreamField{}
+	that.Address = u.Hostname()
+	that.Port, _ = strconv.Atoi(u.Port())
 
-	// 4. Address နဲ့ Port ကို ခွဲထုတ်မယ်
-	if strings.Contains(addrPort, ":") {
-		parts := strings.Split(addrPort, ":")
-		that.Address = parts[0]
-		that.Port, _ = strconv.Atoi(parts[1])
-	} else {
-		that.Address = addrPort
-	}
+	// ✅ SIP002 format handles (ss://base64(method:password)@addr:port)
+	if u.User != nil {
+		userInfo := u.User.String()
+		
+		// Decode base64 if user info is still encoded
+		if decoded, err := base64.URLEncoding.DecodeString(userInfo); err == nil {
+			userInfo = string(decoded)
+		} else if decoded, err := base64.StdEncoding.DecodeString(userInfo); err == nil {
+			userInfo = string(decoded)
+		}
 
-	// 5. UserInfo ကို Decode လုပ်မယ် (Plain text ရော Base64 ပါ handle လုပ်မယ်)
-	userInfoDec := userInfoEnc
-	// URL-encoded ဖြစ်နေနိုင်တာကို unescape အရင်လုပ် (%2B -> +)
-	if s, err := url.QueryUnescape(userInfoEnc); err == nil {
-		userInfoDec = s
-	}
+		parts := strings.SplitN(userInfo, ":", 2)
+		if len(parts) == 2 {
+			that.Method = parts[0]
+			that.Password = parts[1]
+		} else {
+			that.Method = parts[0]
+		}
 
-	// method:password ပုံစံရှိမရှိ စစ်မယ်
-	if strings.Contains(userInfoDec, ":") {
-		that.extractMethodPass(userInfoDec)
-	} else {
-		// method:password မဟုတ်ရင် base64 ဖြစ်နိုင်လို့ decode လုပ်ကြည့်မယ်
-		if decoded, err := base64.StdEncoding.DecodeString(userInfoDec); err == nil {
-			that.extractMethodPass(string(decoded))
+		if that.Method == "rc4" {
+			that.Method = "rc4-md5"
+		}
+		if _, ok := SSMethod[that.Method]; !ok {
+			that.Method = "none"
 		}
 	}
+
+	query := u.Query()
+	that.Host = query.Get("host")
+	that.Mode = query.Get("mode")
+	that.Mux = query.Get("mux")
+	that.Path = query.Get("path")
+	that.Plugin = query.Get("plugin")
+	that.OBFS = query.Get("obfs")
+	that.OBFSHost = query.Get("obfs-host")
 }
 
-// Method နဲ့ Password ခွဲထုတ်တဲ့ Helper
-func (that *ParserSS) extractMethodPass(info string) {
-	parts := strings.SplitN(info, ":", 2)
-	if len(parts) == 2 {
-		that.Method = parts[0]
-		that.Password = parts[1]
-	} else {
-		that.Method = parts[0]
+func (that *ParserSS) handleSS(rawUri string) string {
+	// Handle non-standard prefix and URL encoding
+	rawUri = strings.ReplaceAll(rawUri, "#ss#\u00261@", "@")
+	
+	// Pre-check for Base64 in standard SIP002 URIs
+	if strings.Contains(rawUri, "ss://") && !strings.Contains(rawUri, "@") {
+		return that.decodeBase64IfNeeded(rawUri)
 	}
+	return rawUri
 }
 
-// တစ်ခုလုံး base64 ဖြစ်နေတဲ့ format အတွက် (ss://YWVzLTEyODtnY206dGVzdEAxMjcuMC4wLjE6MTIzNA==)
-func (that *ParserSS) handleBase64Format(data string) {
-	// Padding ညှိမယ်
+func (that *ParserSS) decodeBase64IfNeeded(rawUri string) string {
+	const prefix = "ss://"
+	if !strings.HasPrefix(rawUri, prefix) {
+		return rawUri
+	}
+
+	data := rawUri[len(prefix):]
+	frag := ""
+	if i := strings.Index(data, "#"); i >= 0 {
+		frag = data[i:]
+		data = data[:i]
+	}
+
+	// Unescape URL encoded characters like %3D to =
+	if s, err := url.QueryUnescape(data); err == nil {
+		data = s
+	}
+
+	// Add padding if needed
 	if m := len(data) % 4; m != 0 {
 		data += strings.Repeat("=", 4-m)
 	}
+
 	decoded, err := base64.StdEncoding.DecodeString(data)
-	if err == nil {
-		// Decode ရလာတဲ့ string ကို @ ပါတဲ့ link အနေနဲ့ ပြန် parse မယ်
-		that.Parse("ss://" + string(decoded))
+	if err != nil {
+		return rawUri
 	}
+
+	return prefix + string(decoded) + frag
 }
 
+func (that *ParserSS) GetAddr() string { return that.Address }
+func (that *ParserSS) GetPort() int    { return that.Port }
+
 func (that *ParserSS) Show() {
-	fmt.Printf("addr: %s, port: %d, method: %s, password: %s\n", 
-		that.Address, that.Port, that.Method, that.Password)
+	fmt.Printf(
+		"addr: %s, port: %d, method: %s, password: %s\n",
+		that.Address,
+		that.Port,
+		that.Method,
+		that.Password,
+	)
 }
