@@ -90,26 +90,31 @@ func (that *ParserSS) decodeBase64IfNeeded(rawUri string) string {
 
 	data := rawUri[len(prefix):]
 
-	// already decoded form (method:pass@host)
+	// already decoded form
 	if strings.Contains(data, "@") {
 		return rawUri
 	}
 
-	// split fragment
+	// fragment
 	frag := ""
 	if i := strings.Index(data, "#"); i >= 0 {
 		frag = data[i:]
 		data = data[:i]
 	}
 
-	// split query
+	// query
 	query := ""
 	if i := strings.Index(data, "?"); i >= 0 {
 		query = data[i:]
 		data = data[:i]
 	}
 
-	// fix padding if missing
+	// ✅ handle URL-encoded base64 (%3D, %2F, %2B)
+	if s, err := url.PathUnescape(data); err == nil {
+		data = s
+	}
+
+	// ✅ auto padding
 	if m := len(data) % 4; m != 0 {
 		data += strings.Repeat("=", 4-m)
 	}
@@ -143,3 +148,4 @@ func (that *ParserSS) Show() {
 		that.Password,
 	)
 }
+
