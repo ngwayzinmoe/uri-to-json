@@ -18,6 +18,22 @@ const (
 	SchemeHysteria2 string = "hysteria2://" // [၁] Hysteria2 ထည့်လိုက်ပါ
 )
 
+// SafeBase64Decode handles standard and URL-safe Base64 with proper padding
+func SafeBase64Decode(str string) string {
+	if str == "" {
+		return ""
+	}
+	// URL Safe replacements
+	str = strings.ReplaceAll(str, "-", "+")
+	str = strings.ReplaceAll(str, "_", "/")
+
+	// Add missing padding if necessary
+	for len(str)%4 != 0 {
+		str += "="
+	}
+	return crypt.DecodeBase64(str)
+}
+
 func GetVpnScheme(rawUri string) string {
 	sep := "://"
 	if !strings.Contains(rawUri, sep) {
@@ -44,8 +60,12 @@ func HandleQuery(rawUri string) (result string) {
 func ParseRawUri(rawUri string) (result string) {
 	// [၂] VMess အတွက် base64 ကို အရင်ကိုင်တွယ်မယ်
 	if strings.HasPrefix(rawUri, SchemeVmess) {
-		if r := crypt.DecodeBase64(strings.Split(rawUri, "://")[1]); r != "" {
+		// VMess processing
+		b64Part := strings.Split(rawUri, "://")[1]
+		if r := SafeBase64Decode(b64Part); r != "" {
 			result = SchemeVmess + r
+		} else {
+			result = rawUri
 		}
 		return
 	}
@@ -72,23 +92,25 @@ func ParseRawUri(rawUri string) (result string) {
 	}
 
 	// Shadowsocks (SS) အတွက်သာ Base64 decoding logic ကို သုံးမယ်
+	result = tempUri
 	host := r.Host
 	uname := r.User.Username()
 	passw, hasPassword := r.User.Password()
 
 	if !strings.Contains(tempUri, "@") {
 		// ss://[base64] format မျိုးအတွက်
-		if hostDecrypted := crypt.DecodeBase64(host); hostDecrypted != "" {
+		if hostDecrypted := SafeBase64Decode(host); hostDecrypted != "" {
 			result = strings.ReplaceAll(tempUri, host, hostDecrypted)
 		}
 	} else if uname != "" && !hasPassword && !strings.Contains(uname, "-") {
 		// ss://[base64]@host:port format မျိုးအတွက်
-		if unameDecrypted := crypt.DecodeBase64(uname); unameDecrypted != "" {
+		if unameDecrypted := SafeBase64Decode(uname); unameDecrypted != "" {
 			result = strings.ReplaceAll(tempUri, uname, unameDecrypted)
 		}
 	} else if hasPassword {
 		// ss://method:[base64_password]@host:port format မျိုးအတွက်
-		if passwDecrypted := crypt.DecodeBase64(passw); passwDecrypted != "" {
+		// user:pass format (အကယ်၍ password က base64 ဖြစ်နေခဲ့လျှင်)
+		if passwDecrypted := SafeBase64Decode(passw); passwDecrypted != "" {
 			result = strings.ReplaceAll(tempUri, passw, passwDecrypted)
 		}
 	}
@@ -99,5 +121,6 @@ func ParseRawUri(rawUri string) (result string) {
 	result = HandleQuery(result)
 	return
 }
+
 
 
